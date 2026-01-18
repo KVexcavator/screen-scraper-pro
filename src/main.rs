@@ -1,25 +1,27 @@
-/// так я ловлю дисплэи, елсли я включу два то выведет два
 use scrap::Display;
+use slint::{SharedString, VecModel};
+use std::rc::Rc;
+
+slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let displays = Display::all()?;
 
-    let targets: Vec<String> = displays
+    let targets: Vec<SharedString> = displays
         .iter()
         .enumerate()
         .map(|(i, d)| {
-            format!("Display {}:::{}:::{}", i, d.height(), d.width())
+            format!("Display {} ::: {}x{}", i, d.width(), d.height()).into()
         })
         .collect();
 
-    println!("Доступные цели:");
-    for t in &targets {
-        println!("  {}", t);
-    }
+    // 👇 КЛЮЧЕВОЙ МОМЕНТ
+    let model = Rc::new(VecModel::from(targets));
 
+    let app = AppWindow::new()?;
+
+    app.set_targets(model.into());
+
+    app.run()?;
     Ok(())
 }
-
-// Доступные цели:
-//   Display 0:::1080:::1920
-//   Display 1:::1080:::1920

@@ -1,0 +1,22 @@
+// https://docs.slint.dev/latest/docs/slint/
+// for preview palitra: Slint: Show Preview
+import { AppHeader } from "./header/header.slint";
+import { TargetsView } from "./content/targets.slint";
+
+export component AppWindow inherits Window {
+    width: 400px;
+    height: 300px;
+    title: "";
+
+    in property <[string]> targets;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        AppHeader {}
+
+        TargetsView {
+            targets: root.targets;
+        }
+    }
+}
