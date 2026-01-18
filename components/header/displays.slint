@@ -1,0 +1,18 @@
+import { ComboBox } from "std-widgets.slint";
+
+export component DisplayListView inherits HorizontalLayout {
+    in property <[string]> displays;
+    in-out property <int> displays_selected_index;
+
+    padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        Rectangle { width: 1px; } // spacer
+
+        ComboBox {
+            model: displays;
+            current-index <=> root.displays_selected_index;
+            width: 200px;
+        }
+}

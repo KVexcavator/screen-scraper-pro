@@ -1,22 +1,24 @@
 // https://docs.slint.dev/latest/docs/slint/
 // for preview palitra: Slint: Show Preview
-import { AppHeader } from "./header/header.slint";
-import { TargetsView } from "./content/targets.slint";
+import { Menu } from "./header/menu.slint";
+import { BodyView } from "./content/body.slint";
 
 export component AppWindow inherits Window {
-    width: 400px;
-    height: 300px;
-    title: "";
+    width: 800px;
+    height: 600px;
+    title: "GAME APP";
 
-    in property <[string]> targets;
+    in property <[string]> displays;
+    in-out property <int> displays_selected_index: 0;
 
     VerticalLayout {
         spacing: 0px;
 
-        AppHeader {}
-
-        TargetsView {
-            targets: root.targets;
+        Menu {
+            displays: root.displays;
+            displays_selected_index <=> root.displays_selected_index;
         }
+
+        BodyView {}
     }
 }

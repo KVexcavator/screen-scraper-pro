@@ -1,26 +1,25 @@
-use scrap::Display;
-use slint::{SharedString, VecModel};
+mod display;
+use slint::VecModel;
 use std::rc::Rc;
 
 slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let displays = Display::all()?;
+    // catch screens
+    let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
 
-    let targets: Vec<SharedString> = displays
-        .iter()
-        .enumerate()
-        .map(|(i, d)| {
-            format!("Display {} ::: {}x{}", i, d.width(), d.height()).into()
-        })
-        .collect();
+    match session_type.as_str() {
+        "wayland" => println!("Wayland detected"),
+        "x11" => println!("X11 detected"),
+        _ => println!("Unknown session"),
+    }
 
-    // 👇 КЛЮЧЕВОЙ МОМЕНТ
-    let model = Rc::new(VecModel::from(targets));
+    // catch displays
+    let displays = display::get_displays()?;
+    let displays = Rc::new(VecModel::from(displays));
 
     let app = AppWindow::new()?;
-
-    app.set_targets(model.into());
+    app.set_displays(displays.into());
 
     app.run()?;
     Ok(())
