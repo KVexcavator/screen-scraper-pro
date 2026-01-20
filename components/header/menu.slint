@@ -4,13 +4,32 @@ import { DisplayListView } from "./displays.slint";
 export component Menu inherits Rectangle {
     in property <[string]> displays;
     in-out property <int> displays_selected_index;
-    height: 44px;
-    background: #3a3a3a;
+    in property <string> session_type;
 
-    DisplayListView {
-        displays: root.displays;
-        displays_selected_index <=> root.displays_selected_index;
+    height: 44px;
+    background: #3a3a3a;    
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        DisplayListView {
+            displays: root.displays;
+            displays_selected_index <=> root.displays_selected_index;
+        }
+
+        Rectangle { width: 1px; }
+
+        Text {
+            text: root.session_type;
+            color:  #ff9800;
+            font-size: 18px;
+            vertical-alignment: center;
+        }
     }
+
+
 
     // TODO здесь будет выбор окон
 

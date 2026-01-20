@@ -6,13 +6,14 @@ slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // catch screens
-    let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let session_type = std::env::var("XDG_SESSION_TYPE")
+        .unwrap_or_else(|_| "unknown".into());
 
-    match session_type.as_str() {
-        "wayland" => println!("Wayland detected"),
-        "x11" => println!("X11 detected"),
-        _ => println!("Unknown session"),
-    }
+    let session_label = match session_type.as_str() {
+        "wayland" => "Wayland",
+        "x11" => "X11",
+        _ => "Unknown",
+    };
 
     // catch displays
     let displays = display::get_displays()?;
@@ -20,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = AppWindow::new()?;
     app.set_displays(displays.into());
+    app.set_session_type(session_label.into());
 
     app.run()?;
     Ok(())

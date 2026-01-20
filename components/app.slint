@@ -9,7 +9,8 @@ export component AppWindow inherits Window {
     title: "GAME APP";
 
     in property <[string]> displays;
-    in-out property <int> displays_selected_index: 0;
+    in property <string> session_type;
+    in-out property <int> displays_selected_index: 0;    
 
     VerticalLayout {
         spacing: 0px;
@@ -17,6 +18,7 @@ export component AppWindow inherits Window {
         Menu {
             displays: root.displays;
             displays_selected_index <=> root.displays_selected_index;
+            session_type: root.session_type;
         }
 
         BodyView {}

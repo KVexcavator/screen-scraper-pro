@@ -8,11 +8,11 @@ export component DisplayListView inherits HorizontalLayout {
         padding-right: 12px;
         spacing: 12px;
 
-        Rectangle { width: 1px; } // spacer
+    Rectangle { width: 1px; } // spacer
 
-        ComboBox {
-            model: displays;
-            current-index <=> root.displays_selected_index;
-            width: 200px;
-        }
+    ComboBox {
+        model: displays;
+        current-index <=> root.displays_selected_index;
+        width: 200px;
+    }
 }
