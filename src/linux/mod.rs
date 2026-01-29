@@ -1,2 +1,2 @@
 pub mod display;
-pub mod wp;
+pub mod pipewire;

@@ -1,4 +1,5 @@
 use game_screen_scraper::linux::display;
+use game_screen_scraper::linux::pipewire::get_wayland_portal;
 use slint::VecModel;
 use std::rc::Rc;
 
@@ -20,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // TODO если wayland - тогда пытаемся работаем с zbus
     if session_type == "wayland"
-        && let Err(e) = game_screen_scraper::linux::wp::get_portal().await
+        && let Err(e) = get_wayland_portal().await
     {
         eprintln!("Portal error: {e}");
     }
