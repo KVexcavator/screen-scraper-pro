@@ -6,20 +6,12 @@ import { BodyView } from "./content/body.slint";
 export component AppWindow inherits Window {
     width: 800px;
     height: 600px;
-    title: "GAME APP";
-
-    in property <[string]> displays;
-    in property <string> session_type;
-    in-out property <int> displays_selected_index: 0;    
+    title: "GAME APP";  
 
     VerticalLayout {
         spacing: 0px;
 
-        Menu {
-            displays: root.displays;
-            displays_selected_index <=> root.displays_selected_index;
-            session_type: root.session_type;
-        }
+        Menu {}
 
         BodyView {}
     }
