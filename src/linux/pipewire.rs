@@ -2,8 +2,10 @@ use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType},
     PersistMode,
 };
+use ashpd::Error;
 
-pub async fn get_wayland_portal() -> ashpd::Result<()> {
+// call window for choose display
+pub async fn get_wayland_portal() -> Result<u32, Error> {
     let screencast = Screencast::new().await?;
 
     let session = screencast.create_session().await?;
@@ -20,8 +22,7 @@ pub async fn get_wayland_portal() -> ashpd::Result<()> {
         .await?;
 
     let response = screencast.start(&session, None).await?.response()?;
+    let stream = &response.streams()[0];
 
-    println!("Portal response streams: {:#?}", response.streams());
-
-    Ok(())
+    Ok(stream.pipe_wire_node_id())
 }

@@ -5,8 +5,10 @@ edition = "2024"
 
 [dependencies]
 ashpd = "0.12.1"
+pipewire = "0.8"
 serde = { version = "1.0.228", features = ["derive"] }
 slint = "1.14.1"
+spa = "0.5"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time"] }
 
 [build-dependencies]
