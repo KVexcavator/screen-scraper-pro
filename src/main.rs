@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let displays = Rc::new(VecModel::from(displays));
 
     let app = AppWindow::new()?;
+    // only for info, it doesn't need with ashpd crate
     app.set_displays(displays.into());
     app.set_session_type(session_label.into());
 
