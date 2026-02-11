@@ -1,39 +1,30 @@
-use game_screen_scraper::linux::pipewire::get_wayland_portal;
-use game_screen_scraper::linux::pw_stream::run_pipewire_capture;
+mod portal;
+mod pipewire;
 
-slint::include_modules!();
+use std::sync::mpsc;
+use std::thread;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // TODO если Linux то пошли проверять xdg
-    // TODO если Windows то идем работать с WinAPI
+async fn main() -> anyhow::Result<()> {
+    let (tx, rx) = mpsc::channel();
 
-    // catch screens
-    let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into());
-    let node_id = if session_type == "wayland" {
-        Some(get_wayland_portal().await?)
-    } else {
-        None
-    };
-    // if let Some(node_id) = node_id {
-    //     println!("Using PipeWire node {}", node_id);
-    // } else {
-    //     println!("No PipeWire node selected");
-    // }
+    // Portal thread (Tokio)
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(portal::run_portal(tx)).unwrap();
+    });
 
-    if let Some(node_id) = node_id {
-        println!("Using PipeWire node {}", node_id);
+    // ждём node_id
+    let node_id = rx.recv().unwrap();
+    eprintln!("[main] got node_id={node_id}");
 
-        // Запускаем PipeWire capture в отдельном Tokio блокирующем потоке
-        let _handle = tokio::task::spawn_blocking(move || {
-            run_pipewire_capture(node_id).unwrap();
-        });
-    } else {
-        println!("No PipeWire node selected");
+    // PipeWire thread (не Tokio)
+    thread::spawn(move || {
+        pipewire::run_pipewire(node_id).unwrap();
+    });
+
+    // 🔹 UI / app loop / просто спим
+    loop {
+        std::thread::park();
     }
-
-    let app = AppWindow::new()?;
-
-    app.run()?;
-    Ok(())
 }
