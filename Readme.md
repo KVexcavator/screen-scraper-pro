@@ -1,5 +1,12 @@
-
-
+### My OBS
+===
+этапы:
+- Подключиться к PipeWire node (я почти тут)
+- Получить buffer в callback
+- Прочитать spa::buffer::Data
+- Конвертировать формат (обычно DMA-BUF/YUV)
+- Скопировать в CPU (RGBA)
+- Передать в Slint Image
 ===
 пакеты:
 ```

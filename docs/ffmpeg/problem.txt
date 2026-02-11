@@ -1,0 +1,230 @@
+Я застрял на своей Ubunt с PipeWire-Wayland
+- node_id получаю через ashpd
+- фреймы не могу получить 
+----
+есть альтернатива PipeWire есть
+нет альтернативы для Wayland
+---
+почему с камеры можно в два вызова, а окно/экран ебаная эпопея с PipeWire
+Камера
+- /dev/video
+- V4L2
+- обычный file descriptor
+- никакой безопасности
+- можно читать байты 
+```python
+cap = cv2.VideoCapture(0)
+ret, frame = cap.read()
+```
+Экран/окно Wayland
+Wayland специально сделан так, чтобы:
+- нельзя читать экран
+- нельзя читать окно
+- нельзя читать чужие буферы
+
+единственный легальный путь:
+App -> xdg-desktop-portal -> compositor -> PipeWire -> наши фреймы
+```
+PipeWire:
+- не high-level
+- не дай мне фрейм
+- не покажи экран
+PipeWire - транспорт
+Типа shared memory + negotiation + zero-copy.
+
+OBS:
+- 80% кода  это не захват
+- 80%  это negotiation, glue, adapters, fallback, hacks
+---
+Альтернативы:
+1. GStreamer не хочешь трахаться с PipeWire напрямую
+gst-launch-1.0 pipewiresrc ! videoconvert ! autovideosink
+из кода:
+```bash
+pipewiresrc node-id=110 ! videoconvert ! appsink
+```
+appsink - получать кадры
+negotiation - делает GStreamer
+PipeWire - спрятан
+OBS, Firefox, Chrome — **все используют GStreamer / похожие abstraction**.
+---
+2. ffmpeg
+```bash
+ffmpeg -f pipewire -i 110 out.raw
+```
+---
+3. X11 
+```python
+import mss
+with mss.mss() as sct:
+    img = sct.grab(sct.monitors[1])
+```
+*на Wayland специально заблокировано, и отключение Wayland головная боль для обычного юзера
+---
+===
+Сейчас я на попытке поймать окно с ffmpeg — самый короткий, честный и рабочий путь.**
+Программа минимум получать сырые фреймы экрана/окна на Wayland
+через xdg-desktop-portal -> PipeWire -> ffmpeg -> фреймы
+Условия (важно)
+- Wayland 
+- PipeWire работает (pw-cli ls Node)
+- Portal есть (xdg-desktop-portal)
+- ffmpeg с поддержкой pipewire
+Проверить:
+```bash
+ffmpeg -formats | grep pipewire
+# хороший результат
+DE pipewire
+```
+саrgo run, где у меня портал открыт,
+- выбираем октно в xdg
+- смотрим [portal] node_id=84
+- в другом терминале
+```
+pw-cli info 110
+```
+permissions: rwxm-
+        type: PipeWire:Interface:Node/3
+*       input ports: 0/0
+*       output ports: 1/2
+*       state: "suspended"
+*       properties:
+*               media.name = "meta-screen-cast-src"
+*               stream.is-live = "true"
+*               node.name = "gnome-shell"
+*               node.want-driver = "true"
+*               node.loop.class = "main"
+*               node.async = "true"
+*               node.driver = "true"
+*               media.class = "Stream/Output/Video"
+*               port.group = "stream.0"
+*               adapt.follower.spa-node = ""
+*               object.register = "false"
+*               factory.id = "9"
+*               clock.quantum-limit = "8192"
+*               node.loop.name = ""
+*               library.name = "videoconvert/libspa-videoconvert"
+*               client.id = "82"
+*               object.id = "84"
+*               object.serial = "203"
+*       params: (9)
+*         3 (Spa:Enum:ParamId:EnumFormat) r-
+*         1 (Spa:Enum:ParamId:PropInfo) --
+*         2 (Spa:Enum:ParamId:Props) -w
+*         4 (Spa:Enum:ParamId:Format) -w
+*         10 (Spa:Enum:ParamId:EnumPortConfig) r-
+*         11 (Spa:Enum:ParamId:PortConfig) rw
+*         15 (Spa:Enum:ParamId:Latency) -w
+*         16 (Spa:Enum:ParamId:ProcessLatency) rw
+*         17 (Spa:Enum:ParamId:Tag) -w
+```
+выполнить команду
+```bash
+pw-cli ls Node
+```
+вернет список всех доступных с параметрами
+---
+Проверка: ffmpeg -> файл (node 84)
+здесь играет условие -  ffmpeg с поддержкой pipewire
+```bash
+ffmpeg -f pipewire -i 84 -frames:v 1 out.png
+# попробовать
+ffmpeg -f pipewire -i default out.mkv
+```
+хороший результат - появится out.png
+===
+!!! у меня пока не появляется, наверное нет поддержки pipewire, важный момент как гарантировать эту поддержку потом на компе пользователя проги, надо выячнять как cargo проперяет такие условия, как наличие пакетов в ОС и их автозагрузка
+
+выводит - Unknown input format: 'pipewire'
+проверяю
+```bash
+ffmpeg -formats | grep pipewire
+ffmpeg -devices | grep pipewire
+```
+ничего не ловит, значит мой ffmpeg собран без libpipewire
+===
+---
+Поток кадров в stdout
+```bash
+ffmpeg \
+  -f pipewire -i 110 \
+  -f rawvideo \
+  -pix_fmt rgb24 \
+  -
+```
+---
+Чтение кадров в Rust 
+Например размер кадра:
+- width = 1920
+- height = 1080
+- rgb24 -> 3 байта на пиксель
+```text
+frame_size = 1920 * 1080 * 3
+```
+```rust
+use std::process::{Command, Stdio};
+use std::io::Read;
+
+fn main() -> std::io::Result<()> {
+    let mut child = Command::new("ffmpeg")
+        .args([
+            "-f", "pipewire",
+            "-i", "110",
+            "-f", "rawvideo",
+         я   "-pix_fmt", "rgb24",
+            "-"
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let mut stdout = child.stdout.take().unwrap();
+
+    let width = 1920;
+    let height = 1080;
+    let frame_size = width * height * 3;
+
+    let mut frame = vec![0u8; frame_size];
+
+    loop {
+        stdout.read_exact(&mut frame)?;
+        println!("got frame: {} bytes", frame.len());
+
+        // тут:
+        // - upload to GPU
+        // - encode
+        // - analyze
+    }
+}
+```
+
+======
+Как получить ffmpeg с pipewire
+1. Flatpak ffmpeg
+```bash
+flatpak install flathub org.freedesktop.Platform.ffmpeg-full
+```
+Проверка:
+```bash
+flatpak run org.freedesktop.Platform.ffmpeg-full ffmpeg -formats | grep pipewire
+# -> D  pipewire
+```
+Запуск:
+```bash
+flatpak run org.freedesktop.Platform.ffmpeg-full ffmpeg \
+  -f pipewire -i default out.mkv
+```
+---
+2: OBS ffmpeg (если OBS стоит)
+OBS уже тащит свой ffmpeg с pipewire
+Путь обычно:
+```bash
+/usr/lib/obs-plugins/ffmpeg/ffmpeg
+```
+почекать:
+```bash
+/usr/lib/obs-plugins/ffmpeg/ffmpeg -formats | grep pipewire
+```
+---
+3: Сборка ffmpeg самому 
+

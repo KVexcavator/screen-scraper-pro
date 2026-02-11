@@ -1,0 +1,70 @@
+zbus - это Rust-библиотека для общения по D-Bus
+D-Bus это системный чатик, через который программы в Linux разговаривают друг с другом
+---
+Аналогия с кошками
+Представим коммуналку:
+- GNOME/Wayland - главный кот
+- xdg-desktop-portal - кот-диспетчер
+- Моё приложение - новый котёнок
+- D-Bus - миска, через которую они общаются
+Мы не пожем просто сказать:
+- эй Wayland, дай мне окно браузера
+Мы должны:
+1. подойти к порталу
+2. сказать правильную фразу
+3. получить разрешение
+4. дождаться ответа
+---
+scrap ловит дисплеи, но не ловит окна под Wayland
+Потому что Wayland запрещает захват окон напрямую
+Нужно идти через xdg-desktop-portal
+А portal только через D-Bus
+А в Rust лучший путь - zbus
+---
+zbus позволяет:
+- подключиться к session bus
+- вызвать метод у сервиса
+- получить ответ
+- подписаться на сигналы
+Примерно как HTTP, но локально.
+---
+Минимальный тест
+```rust
+use zbus::Connection;
+
+#[tokio::main]
+async fn main() -> zbus::Result<()> {
+    let connection = Connection::session().await?;
+    println!("Я подключился к D-Bus");
+    Ok(())
+}
+```
+пример, узнать версию портала(нихуя не работает):
+```rust
+use zbus::Connection;
+
+#[tokio::main]
+async fn main() -> zbus::Result<()> {
+    let connection = Connection::session().await?;
+
+    let proxy = zbus::Proxy::new(
+        &connection,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.ScreenCast",
+    ).await?;
+
+    let version: u32 = proxy.get_property("version").await?;
+    println!("Portal version = {}", version);
+
+    Ok(())
+}
+```
+---
+zbus в моей архитектуре
+Rust backend
+ ├── X11  -> scrap/xcb
+ ├── Wayland
+ │    └── zbus → xdg-desktop-portal
+ └── UI (Slint)
+---

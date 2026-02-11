@@ -1,0 +1,23 @@
+Вместо прямого zbus‑вызова:
+ashpd - Rust‑обёртка для Portal API
+Пример работы с ScreenCast через ashpd
+===
+это работает
+Portal response streams: [
+    Stream {
+        pipewire_node_id: 81,
+        position: None,
+        size: Some(
+            (
+                1920,
+                1080,
+            ),
+        ),
+        source_type: Some(
+            Window,
+        ),
+        id: Some(
+            "0",
+        ),
+    },
+]
