@@ -9,28 +9,17 @@
 ├── ui/                  # Slint crate
 ├── linux-backend/       # ловим окна на linux
 ├── windows-backend/     # ловим окна на windows
-└── app/                 # общий launcher (опционально)
-```
-#### linux-backend/src/main.rs или windows-backend/src/main.rs
-```rust
-use screen_ui::run_app;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Running Linux backend");
-
-    // тут portal + pipewire
-
-    run_app()?;
-    Ok(())
-}
-```
-#### Slint один и тот же
-```bash
-cargo run -p linux-backend
-cargo run -p windows-backend
+└── app/                 # общий launcher
 ```
 #### app crate для авто-определение платформы
-- пока удобнее запускать по пакетам
+- Cargo умеет определять ОС и подтягивать нужные зависимости через cfg
+```bash
+cargo run
+```
+#### команда добавления пакетов по отделности
+```bash
+cargo add tokio -p windows-backend --features all
+```
 ===
 #### этапы Linux:
 - Подключиться к PipeWire node (я почти тут)

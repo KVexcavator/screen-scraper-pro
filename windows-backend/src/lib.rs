@@ -1,6 +1,6 @@
 use screen_ui::run_app;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running Windows backend");
 
     // WinAPI capture тут
