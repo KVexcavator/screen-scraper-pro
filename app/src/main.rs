@@ -1,15 +1,23 @@
-#[cfg(target_os = "linux")]
-fn run_backend(){
-  println!("LINUX RUN");
-  linux_backend::run();
-}
 
-#[cfg(target_os = "windows")]
-fn run_backend(){
-  println!("WINDOWS RUN");
-  windows_backend::run();
-}
+mod utils_linux;
+mod utils_windows;
 
 fn main(){
-  run_backend();
+    #[cfg(target_os = "linux")]
+        {
+            use crate::utils_linux::hello;
+
+            hello();
+
+            linux_backend::run();
+        }
+    #[cfg(target_os = "windows")]
+        {
+            use crate::utils_windows::hello;
+
+            hello();
+
+            windows_backend::run();
+        }
 }
+
