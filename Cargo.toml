@@ -1,17 +1,9 @@
-[package]
-name = "game-screen-scraper"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "ui",
+    "linux-backend",
+    "windows-backend",
+    "app",
+]
 
-[dependencies]
-anyhow = "1.0.100"
-ashpd = "0.12.1"
-futures-util = "0.3.31"
-pipewire = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-slint = "1.14.1"
-spa = "0.5"
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
-
-[build-dependencies]
-slint-build = "1.14.1"
+resolver = "2"

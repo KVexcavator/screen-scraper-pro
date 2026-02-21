@@ -1,0 +1,13 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+screen-ui = { path = "../ui" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-backend = { path = "../linux-backend" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-backend = { path = "../windows-backend" }

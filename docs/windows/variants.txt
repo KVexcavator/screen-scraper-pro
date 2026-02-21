@@ -1,0 +1,57 @@
+crate windows это низкий уровень
+---
+Как OBS захватывает окно , использует 3 разных метода:
+| Метод                      | Когда используется      |
+| -------------------------- | ----------------------- |
+| Windows Graphics Capture   | Windows 10+ (основной)  |
+| Desktop Duplication (DXGI) | fallback / экран        |
+| Game Capture (hook)        | только для игр (инжект) |
+---
+Windows Graphics Capture (WGC) лучший вариант
+В Rust:
+```toml
+windows = { version = "0.56", features = [
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_UI_WindowsAndMessaging"
+]}
+```
+Пайплайн:
+
+```
+HWND
+ ↓
+CreateCaptureItemForWindow
+ ↓
+FramePool
+ ↓
+получаем DX11 texture
+```
+---
+Готовые Rust-обёртки (проще)
+crate windows-capture:
+- захват окна по HWND
+- захват монитора
+- DX11 frames
+- callback на каждый кадр
+```rust
+use windows_capture::capture::GraphicsCapture;
+
+GraphicsCapture::new_window(hwnd)?.start(|frame| {
+    // frame.texture
+});
+```
+---
+Для поиска окон 
+crate: window-enumerator
+crate: winapi-ui-automation
+---
+ловить окно и получать видео windows-capture самый близкий к OBS high-level вариант* в Rust
+---
+| Задача        | Инструмент            |
+| ------------- | --------------------- |
+| Найти окно    | windows (EnumWindows) |
+| Захват окна   | windows-capture       |
+| Захват экрана | scrap / dxgi          |
+| Как OBS       | windows-capture + WGC |
