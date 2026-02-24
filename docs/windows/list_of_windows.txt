@@ -104,11 +104,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 ---
-
-===================
-Захват окна в Slint стек:
-Win32 EnumWindows -> выбрать HWND
-+
-Windows Graphics Capture
-https://docs.rs/windows-capture/latest/windows_capture/
----

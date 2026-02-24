@@ -2,17 +2,26 @@
 // for preview palitra: Slint: Show Preview
 import { Menu } from "./header/menu.slint";
 import { BodyView } from "./content/body.slint";
+import { ListView } from "std-widgets.slint";
 
 export component AppWindow inherits Window {
+    in property <[string]> titles;    
+    
     width: 800px;
     height: 600px;
-    title: "GAME APP";  
-
-    VerticalLayout {
-        spacing: 0px;
-
-        Menu {}
-
-        BodyView {}
+    title: "GAME APP";
+    
+    ListView {
+        for title in titles: Text {
+            text: title;
+        }
     }
+
+//    VerticalLayout {
+//        spacing: 0px;
+//
+//        Menu {}
+//
+//        BodyView {}
+//    }
 }
