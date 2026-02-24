@@ -1,0 +1,154 @@
+Пример 1
+Cписок окон приложений Windows
+На Windows список открытых окон получают через Win32 API (например, функцию EnumWindows) — это низкоуровневые системные вызовы, которые в Rust доступны через крейты вроде windows или winapi
+Вот пример, как это делается через crate windows (Win32 API):
+
+```rust
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
+use windows::Win32::Foundation::{HWND, PWSTR};
+use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt;
+
+fn main() {
+    unsafe {
+        EnumWindows(Some(enum_proc), 0);
+    }
+}
+
+unsafe extern "system" fn enum_proc(hwnd: HWND, _lparam: isize) -> bool {
+    if IsWindowVisible(hwnd).as_bool() {
+        let mut buf = vec![0u16; 512];
+        let len = GetWindowTextW(hwnd, PWSTR(buf.as_mut_ptr()), buf.len() as i32);
+        if len > 0 {
+            let title = OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned();
+            println!("Окно: HWND={:?}, Title={}", hwnd, title);
+        }
+    }
+    true
+}
+```
+здесь:
+- EnumWindows вызывает callback для каждого окна в системе
+- В callback’е мы проверяем, видимо ли окно (IsWindowVisible)
+- Считываем его заголовок через GetWindowTextW
+- Выводим список названий
+---
+===
+Пример 2 
+Список окон с windows_capture
+```rust
+use windows_capture::window::Window;
+let window = Window::from_title("Game Window").unwrap();
+let frame = /* захват */;
+let pixels = frame.buffer()?; // Вставьте в Slint Image
+```
+===================
+Захват окна в Slint стек:
+Win32 EnumWindows -> выбрать HWND
++
+Windows Graphics Capture
+https://docs.rs/windows-capture/latest/windows_capture/
+---
+Чистый Win32
+```Cargo.toml
+[package]
+name = "list-windows"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+windows = { version = "0.56", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging"
+] }
+```
+```src/main.rs
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible,
+};
+use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt;
+
+fn main() {
+    unsafe {
+        println!("Visible windows:");
+        EnumWindows(Some(enum_windows_proc), LPARAM(0));
+    }
+}
+
+unsafe extern "system" fn enum_windows_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+    if !IsWindowVisible(hwnd).as_bool() {
+        return BOOL(1);
+    }
+
+    let length = GetWindowTextLengthW(hwnd);
+    if length == 0 {
+        return BOOL(1);
+    }
+
+    let mut buffer = vec![0u16; (length + 1) as usize];
+    GetWindowTextW(hwnd, &mut buffer);
+
+    let title = OsString::from_wide(&buffer[..length as usize])
+        .to_string_lossy()
+        .into_owned();
+
+    if !title.trim().is_empty() {
+        println!("HWND: {:?} | {}", hwnd, title);
+    }
+
+    BOOL(1)
+}
+```
+Вывод примерно:
+```
+HWND: 0x0000000000120A4E | Visual Studio Code
+HWND: 0x00000000000308F2 | Google Chrome
+HWND: 0x00000000000104D6 | Telegram
+```
+---
+windows-capture для захвата окна
+```Cargo.toml
+[package]
+name = "capture-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+windows-capture = "1"
+```
+```src/main.rs
+use windows_capture::window::Window;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // окно по заголовку
+    let window = Window::from_title("Notepad")?;
+
+    println!("Found window: {:?}", window);
+
+    // получить размер
+    let rect = window.rect()?;
+    println!("Rect: {:?}", rect);
+
+    Ok(())
+}
+```
+---
+Получить список окон через windows-capture:
+```rust
+use windows_capture::window::Window;
+
+fn main() {
+    let windows = Window::all().unwrap();
+
+    for w in windows {
+        if let Ok(title) = w.title() {
+            if !title.is_empty() {
+                println!("{}", title);
+            }
+        }
+    }
+}
+```
+
