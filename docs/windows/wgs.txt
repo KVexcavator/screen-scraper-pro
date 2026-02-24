@@ -1,0 +1,85 @@
+Windows Graphics Capture (WGC) - это API Windows 10+, который позволяет захватывать:
+- отдельное окно
+- весь экран
+- регион
+
+Основная идея:
+OS -> GPU -> frames -> app
+Схема работы:
+Окно (HWND)
+->
+Windows Graphics Capture
+->
+DirectX texture (GPU)
+->
+(опционально)
+копия в CPU (bytes)
+->
+Slint / encoder / stream
+---
+Ключевые моменты:
+1. Захват идёт на GPU
+Windows не копирует пиксели через CPU сразу. Мы получаем Direct3D texture.
+- очень быстро
+- почти без нагрузки на CPU
+- работает даже с играми и аппаратным рендером
+2.  Нужно выбрать источник:
+- HWND (окно)
+- Monitor
+- Region
+Для окна:
+```
+EnumWindows -> HWND
+->
+CreateCaptureItemForWindow(hwnd)
+```
+3. Поток кадров
+После запуска StartCapture()
+Windows начинает слать:
+FrameArrived -> texture -> FrameArrived -> texture -> ...
+Обычно 30–60 FPS.
+---
+Rust crate windows-capture, oн делает:
+HWND -> WGC -> texture -> bytes
+- создаёт D3D11 device
+- создаёт GraphicsCaptureItem
+- запускает frame pool
+- конвертирует в CPU buffer
+---
+Архитектура windows-capture
+Window::from_title()
+->
+GraphicsCaptureItem
+->
+FramePool
+->
+callback(frame)
+->
+frame.buffer() -> &[u8]
+На выходе:
+BGRA pixels
+width
+height
+stride
+пригодно для:
+- Slint
+- ffmpeg
+- encoder
+- network
+
+---
+пример кода:
+```
+let window = Window::from_title("Game")?;
+let mut capture = window.start_capture(|frame| {
+    let buffer = frame.buffer()?;
+    // тут пиксели
+});
+```
+... дальше поток кадров.
+
+---
+Минимальный план:
+Windows Graphics Capture
+-> поток кадров
+-> показываем в Slint
