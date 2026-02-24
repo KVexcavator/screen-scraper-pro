@@ -1,11 +1,13 @@
-fn main() {    
-    #[cfg(target_os = "linux")]
-    {
-        check_pkg("libpipewire-0.3");
-        check_pkg("libspa-0.2");
-    }
+#[cfg(target_os = "linux")]
+fn main() {
+    check_pkg("libpipewire-0.3");
+    check_pkg("libspa-0.2");
 }
 
+#[cfg(not(target_os = "linux"))]
+fn main() {}
+
+#[cfg(target_os = "linux")]
 fn check_pkg(name: &str) {
     match pkg_config::Config::new().probe(name) {
         Ok(_) => {
@@ -21,6 +23,8 @@ fn check_pkg(name: &str) {
     }
 }
 
+
+#[cfg(target_os = "linux")]
 fn apt_name(name: &str) -> String {
     match name {
         "libpipewire-0.3" => "libpipewire-0.3-dev".to_string(),

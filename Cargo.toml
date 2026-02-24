@@ -5,5 +5,5 @@ members = [
     "windows-backend",
     "app",
 ]
-
+default-members = ["app"]
 resolver = "2"

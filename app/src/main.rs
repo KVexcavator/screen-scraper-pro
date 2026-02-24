@@ -9,7 +9,7 @@ fn main(){
 
             hello();
 
-            linux_backend::run();
+            let _ = linux_backend::run();
         }
     #[cfg(target_os = "windows")]
         {
@@ -17,7 +17,7 @@ fn main(){
 
             hello();
 
-            windows_backend::run();
+            let _ = windows_backend::run();
         }
 }
 

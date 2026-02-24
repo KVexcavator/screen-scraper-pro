@@ -3,7 +3,7 @@ name = "linux-backend"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 screen-ui = { path = "../ui" }
 anyhow = "1.0.100"
 ashpd = "0.12.1"
@@ -12,6 +12,6 @@ pipewire = "0.8"
 spa = "0.5"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 
-[build-dependencies]
+[target.'cfg(target_os = "linux")'.build-dependencies]
 pkg-config = "0.3.32"
 
