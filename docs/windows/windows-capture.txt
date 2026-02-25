@@ -1,0 +1,138 @@
+https://docs.rs/windows-capture/latest/windows_capture/
+====
+Библиотека Windows Capture на Rust
+Windows Capture — это высокоэффективная библиотека на Rust и Python, которая позволяет легко захватывать экран с помощью API Graphics Capture. Эта библиотека позволяет легко захватывать экран вашего компьютера под управлением Windows и использовать его для различных целей, таких как создание обучающих видеороликов, создание скриншотов или запись игрового процесса. Благодаря интуитивно понятному интерфейсу и мощной функциональности, Windows-Capture — отличный выбор для тех, кто ищет надежное и простое в использовании решение для захвата экрана.
+
+Особенности
+Обновляет кадр только при необходимости.
+Высокая производительность.
+Простота использования.
+Новейший API для захвата экрана.
+Установка
+Добавьте эту библиотеку в ваш Cargo.toml:
+[dependencies]
+windows-capture = "1.5.0"
+или
+cargo add windows-capture
+---
+исползование
+```
+use std::io::{self, Write};
+
+use std::time::Instant;
+
+use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
+use windows_capture::encoder::{
+AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
+};
+use windows_capture::frame::Frame;
+use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::monitor::Monitor;
+use windows_capture::settings::{
+ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+};
+
+// Обрабатывает события захвата.
+struct Capture {
+    // Видеокодер, который будет использоваться для кодирования кадров.
+    encoder: Option<VideoEncoder>,
+    // Для измерения времени работы захвата
+    start: Instant,
+}
+
+impl GraphicsCaptureApiHandler for Capture {
+
+    // Тип флагов, используемых для получения значений из настроек.
+    type Flags = String;
+    // Тип ошибки, которая может быть возвращена функциями `CaptureControl` и `start`
+    //
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    // Функция, которая будет вызвана для создания нового экземпляра. Флаги могут быть
+    // переданы из настроек.
+
+    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+        println!("Создано с флагами: {}", ctx.flags);
+
+        let encoder = VideoEncoder::new(
+            VideoSettingsBuilder::new(1920, 1080),
+            AudioSettingsBuilder::default().disabled(true),
+            ContainerSettingsBuilder::default(),
+            "video.mp4",
+        )?;
+
+        Ok(Self { encoder: Some(encoder), start: Instant::now() })
+    }
+
+    // Вызывается каждый раз, когда доступен новый кадр.
+    fn on_frame_arrived(
+        &mut self,
+        frame: &mut Frame,
+        capture_control: InternalCaptureControl,
+    ) -> Result<(), Self::Error> {
+        print!("\rЗапись длится: {} секунд", self.start.elapsed().as_secs());
+        io::stdout().flush()?;
+
+        // Отправить кадр в видеокодер
+        self.encoder.as_mut().unwrap().send_frame(frame)?;
+
+        // Примечание: кадр также может использоваться для других целей, например, вы можете сохранить один кадр
+        // в файл, например: frame.save_as_image("frame.png", ImageFormat::Png)?;
+
+        // Или получить необработанные данные, чтобы иметь полный контроль:
+        // let data = frame.buffer()?;
+
+        // Остановить захват через 6 секунд
+        if self.start.elapsed().as_secs() >= 6 {
+
+        // Завершить кодирование и сохранить видео.
+        self.encoder.take().unwrap().finish()?;
+
+        capture_control.stop();
+        // Поскольку предыдущие сообщения не содержали символ новой строки.
+        println!();
+        }
+        Ok(())
+    }
+
+    // Необязательный обработчик, вызываемый при закрытии элемента захвата (обычно окна).
+    fn on_closed(&mut self) -> Result<(), Self::Error> {
+        println!("Сессия захвата завершена");
+        Ok(())
+    }
+}
+
+// Получает основной монитор, см. документацию для других элементов захвата.
+let primary_monitor = Monitor::primary().expect("Основного монитора нет");
+
+let settings = Settings::new(
+
+    // Элемент для захвата
+    primary_monitor,
+
+    // Настройки курсора для захвата
+    CursorCaptureSettings::Default,
+
+    // Настройки границы отрисовки
+    DrawBorderSettings::Default,
+
+    // Настройки вторичного окна, если вы хотите включить в захват вторичные окна
+    SecondaryWindowSettings::Default,
+
+    // Минимальный интервал обновления, если вы хотите изменить ограничение частоты кадров (по умолчанию 60 FPS или 16,67 мс)
+    MinimumUpdateIntervalSettings::Default,
+
+    // Настройки «грязной» области,
+    DirtyRegionSettings::Default,
+
+    // Желаемый цветовой формат для захваченного кадра.
+    ColorFormat::Rgba8,
+
+    // Дополнительные флаги для настроек захвата, которые будут переданы в определяемую пользователем функцию `new`.
+    "Да, это работает".to_string(),
+);
+
+// Запускает захват и берет управление текущим потоком.
+// Здесь будут отображаться ошибки из трейта обработчика.
+Capture::start(settings).expect("Ошибка захвата экрана");
+```

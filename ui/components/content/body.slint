@@ -1,15 +1,37 @@
 import { Button } from "std-widgets.slint";
+
+export component VideoView inherits Rectangle {
+    in property <image> preview;
+
+    background: #FFD580;
+
+    Image {
+        source: preview;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+}
+
 export component BodyView inherits VerticalLayout {
     in property <[string]> titles;
-    in property <bool> show_modal;
+    in property <bool> show_modal_list;
+    in property <image> preview;
 
     callback item_selected(index: int);
 
-    if show_modal: VerticalLayout {
+    // если модалка — показываем список
+    if show_modal_list: VerticalLayout {
         spacing: 4px;
+
         for title[i] in titles: Button {
             text: title;
             clicked => item_selected(i);
         }
+    }
+
+    // если нет модалки — видео
+    if !show_modal_list: VideoView {
+        preview: root.preview;
     }
 }

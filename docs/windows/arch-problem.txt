@@ -1,79 +1,121 @@
-так у меня работает
-```ui/components/app.slint
-// https://docs.slint.dev/latest/docs/slint/
-// for preview palitra: Slint: Show Preview
-import { Menu } from "./header/menu.slint";
-import { BodyView } from "./content/body.slint";
-import { Button, ListView, VerticalBox } from "std-widgets.slint";
+ОWindows Graphics Capture -> кадры (RGBA) -> Slint -> Image
+---
+windows-capture даёт:
+Frame -> RGBA buffer (GPU/CPU)
+Slint умеет показывать:
+slint::Image (SharedPixelBuffer<Rgba8Pixel>)
+---
+pipeline такой:
+Windows Capture
+->
+Frame::buffer()  (RGBA bytes)
+->
+SharedPixelBuffer
+->
+Image
+->
+set property в Slint
+```
 
+---
+Шаг 1. Slint: добавить Image
+```slint
 export component AppWindow inherits Window {
-    width: 800px;
-    height: 600px;
-    title: "GAME APP";
+    in property <image> preview;
 
-    in property <[string]> titles;
-    callback request_titles();
-    callback window_selected(index: int);
-
-    property <bool> show_modal: false;
-
-    VerticalBox {
-       Button {
-           text: "Select Window";
-           clicked => {
-                root.request_titles();
-                root.show_modal = true;
-           }
-       }
+    VerticalLayout {
+        Image {
+            source: preview;
+            width: parent.width;
+            height: parent.height;
+        }
     }
+}
+```
+---
+Шаг 2. В UI handle добавить метод:
+```rust
+use slint::{Image, SharedPixelBuffer, Rgba8Pixel};
 
-   if show_modal : ListView {
-        for title[i] in titles: Button {
-            text: title;
-            clicked => {
-                root.window_selected(i);
-                root.show_modal = false;
+impl UiHandle {
+    pub fn set_frame(&self, width: u32, height: u32, data: Vec<u8>) {
+        let buffer = SharedPixelBuffer::<Rgba8Pixel>::from_vec(
+            data,
+            width,
+            height,
+        );
+
+        let image = Image::from_rgba8(buffer);
+        self.app.set_preview(image);
+    }
+}
+```
+---
+Шаг 3. Получение кадра из windows-capture
+В handler:
+```rust
+use windows_capture::frame::Frame;
+
+fn on_frame_arrived(
+    &mut self,
+    frame: &mut Frame,
+    _control: InternalCaptureControl,
+) -> Result<(), Self::Error> {
+
+    let width = frame.width();
+    let height = frame.height();
+
+    // Получаем RGBA buffer
+    let data = frame.buffer()?; // Vec<u8>
+
+    // Передаём в UI
+    self.sender.send((width, height, data)).ok();
+
+    Ok(())
+}
+```
+---
+Шаг 4. Поток
+GraphicsCapture работает в своём потоке, а Slint — в UI-потоке:
+capture thread
+-> mpsc
+UI thread
+-> invoke_from_event_loop
+Slint
+```
+В app
+
+```rust
+let (tx, rx) = std::sync::mpsc::channel::<(u32, u32, Vec<u8>)>();
+
+// передаёшь tx в Capture handler
+start_capture(tx);
+```
+
+---
+
+## Приём в UI
+
+```rust
+let ui_weak = ui.app.as_weak();
+
+std::thread::spawn(move || {
+    while let Ok((w, h, data)) = rx.recv() {
+        let ui_weak = ui_weak.clone();
+
+        slint::invoke_from_event_loop(move || {
+            if let Some(app) = ui_weak.upgrade() {
+                let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::from_vec(
+                    data, w, h,
+                );
+                let image = slint::Image::from_rgba8(buffer);
+                app.set_preview(image);
             }
-        }
-   }
-
-
-//    VerticalLayout {
-//        spacing: 0px;
-//        Menu {}
-//        BodyView {}
-//    }
-}
-```
-```ui/components/header/menu.slint
-import { ComboBox } from "std-widgets.slint";
-
-export component Menu inherits Rectangle {
-    height: 44px;
-    background: #3a3a3a;
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 12px;
-
-        Rectangle { width: 1px; }
-
-        Text {
-            text: "SOME TEXT";
-            color:  #ff9800;
-            font-size: 18px;
-            vertical-alignment: center;
-        }
+        }).unwrap();
     }
-
-}
+});
 ```
-```ui/components/content/body.slint
-export component BodyView inherits VerticalLayout {
-
-}
-```
-1. хочу что бы кнопка была в меню, модалка в body
-2. после выбора, модалка со списком дожна исчезать
-(гдобал н еисползовать ни вкоем случее, не работтает эта муйта)
+=======
+Это норм для прототипа.Потом можно ускорить через:
+frame.buffer_mut()
+reuse buffer

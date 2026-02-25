@@ -1,4 +1,3 @@
-
 import { Menu } from "header/menu.slint";
 import { BodyView } from "content/body.slint";
 
@@ -8,10 +7,11 @@ export component AppWindow inherits Window {
     title: "GAME APP";
 
     in property <[string]> titles;
+    in property <image> preview;
     callback request_titles();
     callback window_selected(index: int);
 
-    property <bool> show_modal: false;
+    property <bool> show_modal_list: false;
 
     VerticalLayout {
         spacing: 0px;
@@ -19,17 +19,18 @@ export component AppWindow inherits Window {
         Menu {
             select_clicked => {
                 root.request_titles();
-                root.show_modal = true;
+                root.show_modal_list = true;
             }
         }
 
         BodyView {
-            show_modal: root.show_modal;
+            show_modal_list: root.show_modal_list;
             titles: root.titles;
+            preview: root.preview;
 
             item_selected(index) => {
                 root.window_selected(index);
-                root.show_modal = false;
+                root.show_modal_list = false;
             }
         }
     }

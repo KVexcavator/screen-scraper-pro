@@ -8,22 +8,27 @@ use windows::{
     },
 };
 
-pub fn get_titles() -> Vec<String> {
-    let mut titles = Vec::new();
+pub struct WindowInfo {
+    pub title: String,
+    pub hwnd: HWND,
+}
+
+pub fn get_windows() -> Vec<WindowInfo> {
+    let mut windows = Vec::new();
 
     unsafe {
         EnumWindows(
             Some(enum_windows_proc),
-            LPARAM(&mut titles as *mut _ as isize),
+            LPARAM(&mut windows as *mut _ as isize),
         ).unwrap();
     }
 
-    titles
+    windows
 }
 
 extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     unsafe {
-        let titles = &mut *(lparam.0 as *mut Vec<String>);
+        let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
 
         if !IsWindowVisible(hwnd).as_bool() {
             return BOOL(1);
@@ -44,7 +49,7 @@ extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let title = String::from_utf16_lossy(&buffer[..read as usize]);
 
         if !title.is_empty() {
-            titles.push(title);
+            windows.push(WindowInfo { title, hwnd });
         }
 
         BOOL(1)

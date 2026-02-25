@@ -1,28 +1,9 @@
 правильный production вариант с передачей HWND
 UI показывает строки, но backend работает с HWND.
 UI никогда не хранит HWND, только индекс или id.
-
----
-Архитектура (production)
-
-Backend:
-```
-Vec<WindowInfo> {
-    title: String,
-    hwnd: HWND
-}
-```
-UI:
-```
-titles: [string]
-```
-При выборе:
 ```
 UI -> передаёт index -> Rust -> index -> HWND
 ```
-
-Почему так:
-
 windows-backend
 ```rust
 pub struct WindowInfo {
@@ -33,54 +14,6 @@ pub struct WindowInfo {
 ```rust
 fn get_windows() -> Vec<WindowInfo> {
     // EnumWindows и т.д.
-}
-```
-```app.slint
-import { Button, VerticalBox, HorizontalBox, ListView } from "std-widgets.slint";
-
-export component AppWindow inherits Window {
-
-    in property <[string]> titles;
-    callback window_selected(int index);
-
-    property <bool> show_modal: false;
-
-    VerticalBox {
-        Button {
-            text: "Select Window";
-            clicked => show_modal = true;
-        }
-    }
-
-    if show_modal : Rectangle {
-        background: #000000aa;
-        width: parent.width;
-        height: parent.height;
-
-        Rectangle {
-            width: 400px;
-            height: 300px;
-            background: white;
-            x: (parent.width - self.width)/2;
-            y: (parent.height - self.height)/2;
-
-            ListView {
-                for title[i] in titles: HorizontalBox {
-                    spacing: 10px;
-
-                    Text { text: title; }
-
-                    Button {
-                        text: "Choose";
-                        clicked => {
-                            root.window_selected(i);
-                            root.show_modal = false;
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 ```
 ```ui/src/lib.rs
