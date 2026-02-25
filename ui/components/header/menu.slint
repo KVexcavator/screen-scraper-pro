@@ -1,22 +1,25 @@
-import { ComboBox } from "std-widgets.slint";
-
+import { Button } from "std-widgets.slint";
 export component Menu inherits Rectangle {
     height: 44px;
-    background: #3a3a3a;    
+    background: #3a3a3a;
+
+    callback select_clicked();
 
     HorizontalLayout {
+        spacing: 12px;
         padding-left: 12px;
         padding-right: 12px;
-        spacing: 12px;
-
-        Rectangle { width: 1px; }
 
         Text {
             text: "SOME TEXT";
-            color:  #ff9800;
+            color: #ff9800;
             font-size: 18px;
             vertical-alignment: center;
         }
-    }
 
+        Button {
+            text: "Select Window";
+            clicked => select_clicked();
+        }
+    }
 }

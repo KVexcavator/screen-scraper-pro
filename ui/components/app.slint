@@ -1,8 +1,6 @@
-// https://docs.slint.dev/latest/docs/slint/
-// for preview palitra: Slint: Show Preview
-import { Menu } from "./header/menu.slint";
-import { BodyView } from "./content/body.slint";
-import { Button, ListView, VerticalBox } from "std-widgets.slint";
+
+import { Menu } from "header/menu.slint";
+import { BodyView } from "content/body.slint";
 
 export component AppWindow inherits Window {
     width: 800px;
@@ -12,33 +10,27 @@ export component AppWindow inherits Window {
     in property <[string]> titles;
     callback request_titles();
     callback window_selected(index: int);
-    
+
     property <bool> show_modal: false;
 
-    VerticalBox {
-       Button {
-           text: "Select Window";
-           clicked => {
+    VerticalLayout {
+        spacing: 0px;
+
+        Menu {
+            select_clicked => {
                 root.request_titles();
                 root.show_modal = true;
-           }
-       }
-    }
+            }
+        }
 
-   if show_modal : ListView {
-        for title[i] in titles: Button {
-            text: title;
-            clicked => {
-                root.window_selected(i);
+        BodyView {
+            show_modal: root.show_modal;
+            titles: root.titles;
+
+            item_selected(index) => {
+                root.window_selected(index);
                 root.show_modal = false;
             }
         }
-   }
-
-
-//    VerticalLayout {
-//        spacing: 0px;
-//        Menu {}
-//        BodyView {}
-//    }
+    }
 }

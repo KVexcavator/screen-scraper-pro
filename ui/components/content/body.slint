@@ -1,3 +1,15 @@
+import { Button } from "std-widgets.slint";
 export component BodyView inherits VerticalLayout {
+    in property <[string]> titles;
+    in property <bool> show_modal;
 
+    callback item_selected(index: int);
+
+    if show_modal: VerticalLayout {
+        spacing: 4px;
+        for title[i] in titles: Button {
+            text: title;
+            clicked => item_selected(i);
+        }
+    }
 }

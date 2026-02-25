@@ -1,63 +1,79 @@
-у меня архитектурная проблема
-сейчас у меня
-```app/src/win_ui.rs
-use screen_ui::run_app;
-use windows_backend::catcher::get_titles;
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Running Windows backend");
-
-    let titles = get_titles();
-
-    for title in &titles {
-        println!("{}", title);
-    }
-    // WinAPI capture тут
-    run_app(&titles)?;
-    Ok(())
-}
-```
-```ui/src/lib.rs
-slint::include_modules!();
-use slint::{SharedString, VecModel, ModelRc};
-use std::rc::Rc;
-
-pub fn run_app(titles: &Vec<String>) -> Result<(), slint::PlatformError> {
-    let app = AppWindow::new()?;
-
-    let data: Vec<SharedString> = titles
-        .iter()
-        .map(|s| SharedString::from(s.as_str()))
-        .collect();
-
-    let model = Rc::new(VecModel::from(data));
-
-    app.set_titles(ModelRc::from(model));
-
-    app.run()
-}
-```
+так у меня работает
 ```ui/components/app.slint
-slint::include_modules!();
-use slint::{SharedString, VecModel, ModelRc};
-use std::rc::Rc;
+// https://docs.slint.dev/latest/docs/slint/
+// for preview palitra: Slint: Show Preview
+import { Menu } from "./header/menu.slint";
+import { BodyView } from "./content/body.slint";
+import { Button, ListView, VerticalBox } from "std-widgets.slint";
 
-pub fn run_app(titles: &Vec<String>) -> Result<(), slint::PlatformError> {
-    let app = AppWindow::new()?;
+export component AppWindow inherits Window {
+    width: 800px;
+    height: 600px;
+    title: "GAME APP";
 
-    let data: Vec<SharedString> = titles
-        .iter()
-        .map(|s| SharedString::from(s.as_str()))
-        .collect();
+    in property <[string]> titles;
+    callback request_titles();
+    callback window_selected(index: int);
 
-    let model = Rc::new(VecModel::from(data));
+    property <bool> show_modal: false;
 
-    app.set_titles(ModelRc::from(model));
+    VerticalBox {
+       Button {
+           text: "Select Window";
+           clicked => {
+                root.request_titles();
+                root.show_modal = true;
+           }
+       }
+    }
 
-    app.run()
+   if show_modal : ListView {
+        for title[i] in titles: Button {
+            text: title;
+            clicked => {
+                root.window_selected(i);
+                root.show_modal = false;
+            }
+        }
+   }
+
+
+//    VerticalLayout {
+//        spacing: 0px;
+//        Menu {}
+//        BodyView {}
+//    }
 }
 ```
-я не хочу, что бы в run_app передавались titles
-мне надо что бы на главной странице была кнопка,  которая вызвает модальное окно
-а уже для этого окна генерировался список titles(на момент вызова)
+```ui/components/header/menu.slint
+import { ComboBox } from "std-widgets.slint";
 
-не знаю как решить, не хочу смешивать бек и фронт
+export component Menu inherits Rectangle {
+    height: 44px;
+    background: #3a3a3a;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        Rectangle { width: 1px; }
+
+        Text {
+            text: "SOME TEXT";
+            color:  #ff9800;
+            font-size: 18px;
+            vertical-alignment: center;
+        }
+    }
+
+}
+```
+```ui/components/content/body.slint
+export component BodyView inherits VerticalLayout {
+
+}
+```
+1. хочу что бы кнопка была в меню, модалка в body
+2. после выбора, модалка со списком дожна исчезать
+(гдобал н еисползовать ни вкоем случее, не работтает эта муйта)
