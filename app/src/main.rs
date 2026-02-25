@@ -1,3 +1,6 @@
+#![allow(unused)]
+
+mod win_ui;
 
 fn main(){
     #[cfg(target_os = "linux")]
@@ -6,7 +9,7 @@ fn main(){
         }
     #[cfg(target_os = "windows")]
         {
-            windows_backend::run();
+            win_ui::run();
         }
 }
 

@@ -4165,6 +4165,7 @@ version = "0.1.0"
 dependencies = [
  "slint",
  "slint-build",
+ "windows-backend",
 ]
 
 [[package]]
@@ -5589,7 +5590,6 @@ dependencies = [
 name = "windows-backend"
 version = "0.1.0"
 dependencies = [
- "screen-ui",
  "windows 0.58.0",
  "windows-capture",
 ]

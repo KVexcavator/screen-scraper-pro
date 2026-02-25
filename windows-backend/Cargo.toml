@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-screen-ui = { path = "../ui" }
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",

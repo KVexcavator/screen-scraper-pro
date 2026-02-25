@@ -1,0 +1,108 @@
+Главное окно -> кнопка -> модалка -> выбор -> отправка в backend -> закрыть.**
+
+1. Кнопка Select Window
+2. Модалка (Dialog-подобное окно)
+3. Список окон
+4. У каждого окна кнопка Choose
+5. При выборе:
+- вызывается callback в Rust
+- окно закрывается
+- в терминал печатается выбранное
+---
+```app.slint
+import { Button, VerticalBox, HorizontalBox, ListView } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+
+    in property <[string]> titles;
+    callback window_selected(string);
+
+    width: 800px;
+    height: 600px;
+
+    property <bool> show_modal: false;
+
+    VerticalBox {
+        spacing: 20px;
+
+        Button {
+            text: "Select Window";
+            clicked => {
+                show_modal = true;
+            }
+        }
+    }
+
+    // --- MODAL ---
+    if show_modal : Rectangle {
+        background: #000000aa;
+        width: parent.width;
+        height: parent.height;
+
+        Rectangle {
+            width: 400px;
+            height: 300px;
+            background: white;
+            x: (parent.width - self.width)/2;
+            y: (parent.height - self.height)/2;
+
+            VerticalBox {
+                spacing: 10px;
+
+                Text { text: "Select a window"; }
+
+                ListView {
+                    for title in titles: HorizontalBox {
+                        spacing: 10px;
+
+                        Text { text: title; }
+
+                        Button {
+                            text: "Choose";
+                            clicked => {
+                                root.window_selected(title);
+                                root.show_modal = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+```ui/src/lib.rs
+slint::include_modules!();
+
+use slint::{SharedString, VecModel, ModelRc};
+use std::rc::Rc;
+
+pub fn run_app(titles: Vec<String>) -> Result<(), slint::PlatformError> {
+    let app = AppWindow::new()?;
+
+    let model = Rc::new(VecModel::from(
+        titles
+            .iter()
+            .map(|s| SharedString::from(s.as_str()))
+            .collect::<Vec<_>>(),
+    ));
+
+    app.set_titles(ModelRc::from(model));
+
+    app.on_window_selected(|title| {
+        println!("Selected window: {}", title);
+    });
+
+    app.run()
+}
+```
+```rust
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let titles = get_titles();
+    run_app(titles)?;
+    Ok(())
+}
+```
+======
+
+

@@ -1,0 +1,151 @@
+правильный production вариант с передачей HWND
+UI показывает строки, но backend работает с HWND.
+UI никогда не хранит HWND, только индекс или id.
+
+---
+Архитектура (production)
+
+Backend:
+```
+Vec<WindowInfo> {
+    title: String,
+    hwnd: HWND
+}
+```
+UI:
+```
+titles: [string]
+```
+При выборе:
+```
+UI -> передаёт index -> Rust -> index -> HWND
+```
+
+Почему так:
+
+windows-backend
+```rust
+pub struct WindowInfo {
+    pub title: String,
+    pub hwnd: isize, // HWND как число
+}
+```
+```rust
+fn get_windows() -> Vec<WindowInfo> {
+    // EnumWindows и т.д.
+}
+```
+```app.slint
+import { Button, VerticalBox, HorizontalBox, ListView } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+
+    in property <[string]> titles;
+    callback window_selected(int index);
+
+    property <bool> show_modal: false;
+
+    VerticalBox {
+        Button {
+            text: "Select Window";
+            clicked => show_modal = true;
+        }
+    }
+
+    if show_modal : Rectangle {
+        background: #000000aa;
+        width: parent.width;
+        height: parent.height;
+
+        Rectangle {
+            width: 400px;
+            height: 300px;
+            background: white;
+            x: (parent.width - self.width)/2;
+            y: (parent.height - self.height)/2;
+
+            ListView {
+                for title[i] in titles: HorizontalBox {
+                    spacing: 10px;
+
+                    Text { text: title; }
+
+                    Button {
+                        text: "Choose";
+                        clicked => {
+                            root.window_selected(i);
+                            root.show_modal = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+```ui/src/lib.rs
+slint::include_modules!();
+
+use slint::{SharedString, VecModel, ModelRc};
+use std::rc::Rc;
+
+pub fn run_app<F>(
+    titles: Vec<String>,
+    on_select: F,
+) -> Result<(), slint::PlatformError>
+where
+    F: Fn(usize) + 'static,
+{
+    let app = AppWindow::new()?;
+
+    let model = Rc::new(VecModel::from(
+        titles.iter()
+            .map(|s| SharedString::from(s.as_str()))
+            .collect::<Vec<_>>(),
+    ));
+
+    app.set_titles(ModelRc::from(model));
+
+    app.on_window_selected(move |index| {
+        on_select(index as usize);
+    });
+
+    app.run()
+}
+```
+Windows backend (с HWND)
+```rust
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let windows = get_windows();
+
+    let titles: Vec<String> =
+        windows.iter().map(|w| w.title.clone()).collect();
+
+    run_app(titles, move |index| {
+        let selected = &windows[index];
+
+        println!("Selected window:");
+        println!("Title: {}", selected.title);
+        println!("HWND:  {:?}", selected.hwnd);
+
+        // здесь дальше:
+        // start_capture(selected.hwnd)
+    })?;
+
+    Ok(())
+}
+```
+ HWND не копируется в UI
+ещё лучше:
+
+```
+struct WindowInfo {
+    title: String,
+    hwnd: HWND,
+    pid: u32,
+}
+```
+
+---
+как передавать HWND в Windows Graphics Capture
+

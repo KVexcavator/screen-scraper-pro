@@ -67,9 +67,7 @@ obs proto - Google Chrome
 Program Manager
 ```
 ====
-Захват окон
-Пример 2
-Список окон с windows_capture
+Захват окон с windows_capture
 ```rust
 use windows_capture::window::Window;
 let window = Window::from_title("Game Window").unwrap();

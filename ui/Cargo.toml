@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 slint = "1.14.1"
+windows-backend = { path = "../windows-backend" }
 
 [build-dependencies]
 slint-build = "1.14.1"
+
