@@ -2,17 +2,27 @@ slint::include_modules!();
 use slint::{SharedString, VecModel, ModelRc};
 use std::rc::Rc;
 
-pub fn run_app(titles: &Vec<String>) -> Result<(), slint::PlatformError> {
-    let app = AppWindow::new()?;
+pub struct UiHandle {
+    pub app: AppWindow,
+    model: Rc<VecModel<SharedString>>,
+}
 
-    let data: Vec<SharedString> = titles
-        .iter()
-        .map(|s| SharedString::from(s.as_str()))
-        .collect();
+impl UiHandle {
+    pub fn new() -> Result<Self, slint::PlatformError> {
+        let app = AppWindow::new()?;
 
-    let model = Rc::new(VecModel::from(data));
+        let model = Rc::new(VecModel::from(Vec::<SharedString>::new()));
+        app.set_titles(ModelRc::from(model.clone()));
 
-    app.set_titles(ModelRc::from(model));
+        Ok(Self { app, model })
+    }
 
-    app.run()
+    pub fn set_titles(&self, titles: Vec<String>) {
+        let data: Vec<SharedString> = titles
+            .into_iter()
+            .map(SharedString::from)
+            .collect();
+
+        self.model.set_vec(data);
+    }
 }

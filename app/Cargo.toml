@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 screen-ui = { path = "../ui" }
+slint = "1.14.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 linux-backend = { path = "../linux-backend" }

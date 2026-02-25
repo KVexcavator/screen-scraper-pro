@@ -2,26 +2,43 @@
 // for preview palitra: Slint: Show Preview
 import { Menu } from "./header/menu.slint";
 import { BodyView } from "./content/body.slint";
-import { ListView } from "std-widgets.slint";
+import { Button, ListView, VerticalBox } from "std-widgets.slint";
 
 export component AppWindow inherits Window {
-    in property <[string]> titles;    
-    
     width: 800px;
     height: 600px;
     title: "GAME APP";
+
+    in property <[string]> titles;
+    callback request_titles();
+    callback window_selected(index: int);
     
-    ListView {
-        for title in titles: Text {
-            text: title;
-        }
+    property <bool> show_modal: false;
+
+    VerticalBox {
+       Button {
+           text: "Select Window";
+           clicked => {
+                root.request_titles();
+                root.show_modal = true;
+           }
+       }
     }
+
+   if show_modal : ListView {
+        for title[i] in titles: Button {
+            text: title;
+            clicked => {
+                root.window_selected(i);
+                root.show_modal = false;
+            }
+        }
+   }
+
 
 //    VerticalLayout {
 //        spacing: 0px;
-//
 //        Menu {}
-//
 //        BodyView {}
 //    }
 }
