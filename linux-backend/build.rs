@@ -11,7 +11,7 @@ fn main() {}
 fn check_pkg(name: &str) {
     match pkg_config::Config::new().probe(name) {
         Ok(_) => {
-          println!("cargo:warning=System dependency {} is OK", name);          
+            println!("cargo:warning=System dependency {} is OK", name);
         }
         Err(_) => {
             println!("cargo:warning=");
@@ -22,7 +22,6 @@ fn check_pkg(name: &str) {
         }
     }
 }
-
 
 #[cfg(target_os = "linux")]
 fn apt_name(name: &str) -> String {

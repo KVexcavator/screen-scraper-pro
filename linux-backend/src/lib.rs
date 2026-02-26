@@ -1,10 +1,9 @@
 #![cfg(target_os = "linux")]
-mod portal;
 mod pipewire;
+mod portal;
 
 use std::sync::mpsc;
 use std::thread;
-
 
 pub fn run() {
     let (tx, rx) = mpsc::channel();

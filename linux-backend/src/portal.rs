@@ -1,6 +1,6 @@
 use ashpd::desktop::{
-    screencast::{CursorMode, Screencast, SourceType},
     PersistMode,
+    screencast::{CursorMode, Screencast, SourceType},
 };
 
 pub async fn run_portal(tx: std::sync::mpsc::Sender<u32>) -> ashpd::Result<()> {

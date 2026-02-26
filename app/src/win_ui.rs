@@ -1,10 +1,10 @@
-use screen_ui::*;
 use screen_ui::UiHandle;
-use windows_backend::catcher::{get_windows, WindowInfo};
-use windows_backend::capture::start_capture;
-use slint::{SharedString, SharedPixelBuffer, Rgba8Pixel, Image};
+use screen_ui::*;
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
 use std::sync::mpsc;
 use std::thread;
+use windows_backend::capture_engine::CaptureEngine;
+use windows_backend::catcher::{WindowInfo, get_windows};
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ui = UiHandle::new()?;
     // канал кадров
@@ -18,17 +18,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             slint::invoke_from_event_loop(move || {
                 if let Some(app) = ui_weak.upgrade() {
-                    let buffer =
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
+                    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
                     let image = Image::from_rgba8(buffer);
                     app.set_preview(image);
                 }
-            }).ok();
+            })
+            .ok();
         }
     });
 
-    let windows_cache =
-        std::rc::Rc::new(std::cell::RefCell::new(Vec::<WindowInfo>::new()));
+    let windows_cache = std::rc::Rc::new(std::cell::RefCell::new(Vec::<WindowInfo>::new()));
 
     {
         let cache = windows_cache.clone();
@@ -37,8 +36,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ui.app.on_request_titles(move || {
             let windows = get_windows();
 
-            let titles: Vec<SharedString> =
-                windows.iter().map(|w| SharedString::from(&w.title)).collect();
+            let titles: Vec<SharedString> = windows
+                .iter()
+                .map(|w| SharedString::from(&w.title))
+                .collect();
 
             *cache.borrow_mut() = windows;
 
@@ -55,9 +56,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ui.app.on_window_selected(move |index| {
             let windows = cache.borrow();
             if let Some(selected) = windows.get(index as usize) {
-                println!("Selected title: {}", selected.title);
+                let engine = CaptureEngine::init().unwrap();
 
-                start_capture(selected.hwnd, tx_capture.clone());
+                engine
+                    .start(selected.hwnd, || {
+                        // пока ничего
+                    })
+                    .unwrap();
             }
         });
     }

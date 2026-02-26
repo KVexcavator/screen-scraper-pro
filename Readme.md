@@ -53,3 +53,7 @@ source ~/.bashrc
 ```
 git reset --hard HEAD~1
 ```
+- атофикс при варнингах
+```
+cargo clippy --fix --lib -p windows-backend
+```

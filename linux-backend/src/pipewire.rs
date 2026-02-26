@@ -7,7 +7,6 @@ use pw::{
     stream::{Stream, StreamFlags},
 };
 
-
 pub fn run_pipewire(node_id: u32) -> anyhow::Result<()> {
     eprintln!("[pw] init");
 
@@ -26,21 +25,19 @@ pub fn run_pipewire(node_id: u32) -> anyhow::Result<()> {
 
     let stream = Stream::new(&core, "screen-capture", props)?;
 
-    let _listener = stream
-        .add_local_listener::<()>()
-        .process(|stream, _| {
-            while let Some(mut buffer) = stream.dequeue_buffer() {
-                for data in buffer.datas_mut() {
-                    let chunk = data.chunk();
-                    eprintln!(
-                        "[pw] frame size={} stride={} offset={}",
-                        chunk.size(),
-                        chunk.stride(),
-                        chunk.offset(),
-                    );
-                }
+    let _listener = stream.add_local_listener::<()>().process(|stream, _| {
+        while let Some(mut buffer) = stream.dequeue_buffer() {
+            for data in buffer.datas_mut() {
+                let chunk = data.chunk();
+                eprintln!(
+                    "[pw] frame size={} stride={} offset={}",
+                    chunk.size(),
+                    chunk.stride(),
+                    chunk.offset(),
+                );
             }
-        });
+        }
+    });
 
     stream.connect(
         Direction::Input,

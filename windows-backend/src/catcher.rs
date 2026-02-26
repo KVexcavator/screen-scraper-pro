@@ -1,11 +1,7 @@
 #![cfg(target_os = "windows")]
-use windows::{
-    Win32::{
-        Foundation::{BOOL, HWND, LPARAM},
-        UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible,
-        },
-    },
+use windows::Win32::{
+    Foundation::{BOOL, HWND, LPARAM},
+    UI::WindowsAndMessaging::{EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible},
 };
 
 pub struct WindowInfo {
@@ -20,7 +16,8 @@ pub fn get_windows() -> Vec<WindowInfo> {
         EnumWindows(
             Some(enum_windows_proc),
             LPARAM(&mut windows as *mut _ as isize),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     windows
