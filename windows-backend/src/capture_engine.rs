@@ -1,3 +1,6 @@
+// Windows Graphics Capture (WGC) - это API Windows 10+,
+// для захвата отдельного окна, всего экрана, региона
+// Использует: D3D11, WinRT, GPU textures, Frame pool
 #![cfg(target_os = "windows")]
 use windows::Foundation::TypedEventHandler;
 use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
@@ -23,11 +26,12 @@ pub struct CaptureEngine {
 
 impl CaptureEngine {
     pub fn init() -> Result<Self> {
+        // Шаг 1 — Инициализация COM
         unsafe { RoInitialize(RO_INIT_MULTITHREADED)?; }
 
+        // Шаг 2 — Создание D3D11 устройства
         let mut device: Option<ID3D11Device> = None;
         let mut context: Option<ID3D11DeviceContext> = None;
-
         unsafe {
             D3D11CreateDevice(
                 None,
@@ -53,11 +57,9 @@ impl CaptureEngine {
     pub fn start<F>(&self, hwnd: HWND, mut on_frame: F) -> Result<()>
     where F: FnMut() + Send + 'static,
     {
-        println!("Starting capture for HWND: {:?}", hwnd.0);
-
+        // Шаг 4 — Создать FramePool
         let item = create_capture_item(hwnd)?;
         let size = item.Size()?;
-        println!("✓ Capture size: {:?}", size);
 
         let frame_pool = Direct3D11CaptureFramePool::Create(
             &self.d3d_device,
@@ -66,30 +68,33 @@ impl CaptureEngine {
             size,
         )?;
 
+        // Шаг 5 — Сессия
         let session = frame_pool.CreateCaptureSession(&item)?;
         session.StartCapture()?;
-        println!("✓ Session started");
 
+        // Шаг 6 — Получение кадров
         let _token = frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
-                println!("✓ FrameArrived registered");
                 move |pool_opt: &Option<Direct3D11CaptureFramePool>, _| {
-                    println!("✓ Event fired!");
                     if let Some(pool) = pool_opt {
                         match pool.TryGetNextFrame() {
                             Ok(frame) => {
+                                // TODO create videofile
+                                // понять что еще есть вo frame
+                                // например frame.Surface()
+                                // как получать ID3D11Texture2D
+                                // дальше либо:
+                                //  - копировать в staging texture
+                                //  - отдавать в encoder
                                 match frame.ContentSize() {
-                                    Ok(content_size) => {
-                                        println!("🚀 FRAME: {}x{}",
-                                                 content_size.Width,
-                                                 content_size.Height
-                                        );
+                                    Ok(size) => {
+                                        println!("FRAME: {}x{}", size.Width, size.Height);
                                         on_frame();
                                     }
-                                    Err(e) => println!("✗ ContentSize error: {:?}", e),
+                                    Err(e) => println!("ContentSize error: {:?}", e),
                                 }
                             }
-                            Err(e) => println!("✗ No frame: {:?}", e),
+                            Err(e) => println!("No frame: {:?}", e),
                         }
                     }
                     Ok(())
@@ -105,6 +110,7 @@ impl CaptureEngine {
 
                 if GetMessageW(pmsg, HWND(std::ptr::null_mut()), 0, 0).as_bool() {
                     let msg_filled = msg.assume_init();
+                    #[allow(unused)]
                     TranslateMessage(&msg_filled as *const _);
                     DispatchMessageW(&msg_filled as *const _);
                 }
@@ -115,12 +121,12 @@ impl CaptureEngine {
     }
 }
 
+// Шаг 3 — Получить GraphicsCaptureItem из HWND
+// тут окно изолируется от перекрытий
 fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
-    println!("Creating capture item for HWND: {:?}", hwnd.0);
     unsafe {
         let interop: IGraphicsCaptureItemInterop =
             windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-        println!("✓ Capture item created");
         interop.CreateForWindow(hwnd)
     }
 }

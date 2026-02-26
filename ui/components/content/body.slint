@@ -1,17 +1,5 @@
 import { Button } from "std-widgets.slint";
-
-export component VideoView inherits Rectangle {
-    in property <image> preview;
-
-    background: #FFD580;
-
-    Image {
-        source: preview;
-        width: parent.width;
-        height: parent.height;
-        image-fit: contain;
-    }
-}
+import { VideoView } from "video.slint";
 
 export component BodyView inherits VerticalLayout {
     in property <[string]> titles;

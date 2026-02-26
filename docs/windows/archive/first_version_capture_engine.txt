@@ -1,0 +1,231 @@
+```windows-backend/src/capture_engine.rs
+#![cfg(target_os = "windows")]
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use windows::Foundation::{TypedEventHandler, EventRegistrationToken};
+use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
+use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
+use windows::core::IInspectable;
+
+use windows::{
+    Graphics::Capture::*,
+    Graphics::DirectX::Direct3D11::*,
+    Graphics::DirectX::*,
+    Win32::{
+        Foundation::HWND,
+        Graphics::{Direct3D::*, Direct3D11::*, Dxgi::*},
+        System::WinRT::*,
+    },
+    core::*,
+};
+
+pub struct CaptureEngine {
+    d3d_device: IDirect3DDevice,
+    frame_pool: Option<Direct3D11CaptureFramePool>,
+    session: Option<GraphicsCaptureSession>,
+    frame_token: Option<EventRegistrationToken>, // ← ДОБАВЛЕНО
+}
+
+impl CaptureEngine {
+    pub fn init() -> Result<Self> {
+        eprintln!("Init CaptureEngine");
+        unsafe {
+            RoInitialize(RO_INIT_MULTITHREADED)?;
+        }
+
+        let mut device: Option<ID3D11Device> = None;
+        let mut context: Option<ID3D11DeviceContext> = None;
+
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                None,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )?;
+        }
+
+        let device = device.unwrap();
+
+        let dxgi_device: IDXGIDevice = device.cast()?;
+        let inspectable: IInspectable =
+            unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
+        let d3d_device: IDirect3DDevice = inspectable.cast()?;
+
+        Ok(Self {
+            d3d_device,
+            frame_pool: None,
+            session: None,
+            frame_token: None, // ← ДОБАВЛЕНО
+        })
+    }
+
+    pub fn start<F>(&mut self, hwnd: HWND, mut on_frame: F) -> Result<()>
+    where
+        F: FnMut() + Send + 'static,
+    {
+        eprintln!("Start CaptureEngine");
+        let item = create_capture_item(hwnd)?;
+
+        let size = item.Size()?;
+        eprintln!("Window size: {:?}", size);
+
+        let frame_pool = Direct3D11CaptureFramePool::Create(
+            &self.d3d_device,
+            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            2,
+            size,
+        )?;
+
+        let session = frame_pool.CreateCaptureSession(&item)?;
+        session.StartCapture()?;
+
+        let fps_counter = Arc::new(Mutex::new((0u32, Instant::now())));
+
+        let token = frame_pool.FrameArrived(
+            &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
+                eprintln!("FrameArrived registered");
+                let fps_counter = fps_counter.clone();
+
+                move |pool: &Option<Direct3D11CaptureFramePool>, _| {
+                    if let Some(pool) = pool {
+                        match pool.TryGetNextFrame() {
+                            Ok(_frame) => {
+                                eprintln!("✓ Frame captured!");
+                                let mut data = fps_counter.lock().unwrap();
+                                data.0 += 1;
+
+                                if data.1.elapsed() >= Duration::from_secs(1) {
+                                    eprintln!("FPS: {}", data.0);
+                                    data.0 = 0;
+                                    data.1 = Instant::now();
+                                }
+
+                                on_frame();
+                            }
+                            Err(e) => eprintln!("Frame error: {:?}", e),
+                        }
+                    }
+                    Ok(())
+                }
+            }),
+        )?;
+
+        self.frame_token = Some(token);   // ← СОХРАНЯЕМ ТОКЕН
+        self.frame_pool = Some(frame_pool);
+        self.session = Some(session);
+
+        Ok(())
+    }
+}
+
+fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
+    unsafe {
+        let interop: IGraphicsCaptureItemInterop =
+            windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+
+        interop.CreateForWindow(hwnd)
+    }
+}
+```
+```app/src/win_ui.rs
+use screen_ui::UiHandle;
+use screen_ui::*;
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use windows_backend::capture_engine::CaptureEngine;
+use windows_backend::catcher::{WindowInfo, get_windows};
+use windows::Win32::Foundation::HWND;
+
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let ui = UiHandle::new()?;
+
+    // канал кадров из capture
+    let (tx, rx) = mpsc::channel::<(u32, u32, Vec<u8>)>();
+
+    let ui_weak = ui.app.as_weak();
+
+    // Поток для UI отображения кадров
+    thread::spawn(move || {
+        while let Ok((w, h, data)) = rx.recv() {
+            let ui_weak = ui_weak.clone();
+            slint::invoke_from_event_loop(move || {
+                if let Some(app) = ui_weak.upgrade() {
+                    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
+                    let image = Image::from_rgba8(buffer);
+                    app.set_preview(image);
+                }
+            })
+                .ok();
+        }
+    });
+
+    let windows_cache = Arc::new(Mutex::new(Vec::<WindowInfo>::new()));
+
+    // Обновление списка окон
+    {
+        let cache = windows_cache.clone();
+        let ui_ref = ui.app.as_weak();
+        ui.app.on_request_titles(move || {
+            let windows = get_windows();
+            let titles: Vec<SharedString> =
+                windows.iter().map(|w| SharedString::from(&w.title)).collect();
+
+            *cache.lock().unwrap() = windows;
+
+            if let Some(app) = ui_ref.upgrade() {
+                app.set_titles((&titles[..]).into());
+            }
+        });
+    }
+
+    // Обработчик выбора окна
+    {
+        let cache = windows_cache.clone();
+        let tx_capture = tx.clone();
+
+        ui.app.on_window_selected(move |index| {
+            let windows = cache.lock().unwrap();
+            if let Some(selected) = windows.get(index as usize) {
+                let hwnd_value = selected.hwnd.0 as isize;
+
+                // Запускаем CaptureEngine в отдельном MTA-потоке
+                let tx_capture = tx_capture.clone();
+                thread::spawn(move || {
+                    eprintln!("Run on_window_selected");
+                    let hwnd = HWND(hwnd_value as _);
+                    let mut engine = CaptureEngine::init().unwrap();
+
+                    engine
+                        .start(hwnd, move|| {
+                            // Пока просто создаём тестовый кадр
+                            // Можно сюда впихнуть код для получения кадра и отправки по tx_capture
+                            let width = 800;
+                            let height = 600;
+                            let data = vec![0u8; (width * height * 4)];
+                            tx_capture.send((
+                                width.try_into().unwrap(),
+                                height.try_into().unwrap(),
+                                data,
+                            )).ok();
+                        })
+                        .unwrap();
+                    //держим поток открытым
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                });
+            }
+        });
+    }
+
+    ui.app.run()?;
+    Ok(())
+}
+```

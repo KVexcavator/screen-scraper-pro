@@ -11,13 +11,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ui = UiHandle::new()?;
 
     // канал кадров из capture
-    let (tx, rx) = mpsc::channel::<(u32, u32, Vec<u8>)>();
+    let (sender, receiver) = mpsc::channel::<(u32, u32, Vec<u8>)>();
 
     let ui_weak = ui.app.as_weak();
 
     // Поток для UI отображения кадров
     thread::spawn(move || {
-        while let Ok((w, h, data)) = rx.recv() {
+        while let Ok((w, h, data)) = receiver.recv() {
             let ui_weak = ui_weak.clone();
             slint::invoke_from_event_loop(move || {
                 if let Some(app) = ui_weak.upgrade() {
@@ -52,7 +52,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Обработчик выбора окна
     {
         let cache = windows_cache.clone();
-        let tx_capture = tx.clone();
 
         ui.app.on_window_selected(move |index| {
             let windows = cache.lock().unwrap();
@@ -60,31 +59,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let hwnd_value = selected.hwnd.0 as isize;
 
                 // Запускаем CaptureEngine в отдельном MTA-потоке
-                let tx_capture = tx_capture.clone();
+                let sender_clone = sender.clone();
                 thread::spawn(move || {
-                    eprintln!("✓ Capture on_window_selected");
                     let hwnd = HWND(hwnd_value as _);
                     let engine = CaptureEngine::init().unwrap();
 
-                    engine
-                        .start(hwnd, move|| {
-                            eprintln!("✓ Capture START");
-                            // Пока просто создаём тестовый кадр
-                            // Можно сюда впихнуть код для получения кадра и отправки по tx_capture
-                            let width = 800;
-                            let height = 600;
-                            let data = vec![0u8; (width * height * 4)];
-                            tx_capture.send((
-                                width.try_into().unwrap(),
-                                height.try_into().unwrap(),
-                                data,
-                            )).ok();
-                        })
-                        .unwrap();
-                    //держим поток открытым
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_secs(1));
-                    }
+                    engine.start(hwnd, move|| { eprintln!("✓ Capture START");});
                 });
             }
         });

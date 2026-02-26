@@ -3,6 +3,10 @@ Windows Graphics Capture (WGC) - это API Windows 10+, который позв
 - весь экран
 - регион
 Использует: D3D11, WinRT, GPU textures, Frame pool
+- окно можно двигать
+- окно можно перекрывать
+- окно можно partially offscreen
+- не будет захвата overlay
 ===
 Минимальный пример на Rust
 ```toml
@@ -19,20 +23,12 @@ windows = { version = "0.56", features = [
 ```
 Шаг 1 — Инициализация COM
 ```rust
-use windows::core::*;
-use windows::Win32::System::WinRT::RoInitialize;
-use windows::Win32::System::WinRT::RO_INIT_MULTITHREADED;
-
 unsafe {
     RoInitialize(RO_INIT_MULTITHREADED)?;
 }
 ```
 Шаг 2 — Создание D3D11 устройства
 ```rust
-use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::Dxgi::Common::*;
-use windows::Win32::Graphics::Direct3D::*;
-
 let mut device = None;
 let mut context = None;
 
@@ -56,9 +52,6 @@ let device = device.unwrap();
 Шаг 3 — Получить GraphicsCaptureItem из HWND
 тут окно изолируется от перекрытий
 ```rust
-use windows::Graphics::Capture::*;
-use windows::Win32::Foundation::HWND;
-
 fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
     unsafe {
         let interop: IGraphicsCaptureItemInterop =
@@ -70,13 +63,8 @@ fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
 ```
 Шаг 4 — Создать FramePool
 ```rust
-use windows::Graphics::DirectX::Direct3D11::*;
-use windows::Graphics::DirectX::*;
-
 let item = create_capture_item(hwnd)?;
-
 let size = item.Size()?;
-
 let d3d_device: IDirect3DDevice =
     CreateDirect3D11DeviceFromDXGIDevice(&device.cast()?)?;
 
@@ -99,26 +87,15 @@ frame_pool.FrameArrived(&TypedEventHandler::new(move |pool, _| {
         if let Ok(frame) = pool.TryGetNextFrame() {
             let surface = frame.Surface()?;
 
-            // здесь получаешь ID3D11Texture2D
+            // здесь получаем ID3D11Texture2D
             // дальше либо:
-            //  - копируешь в staging texture
-            //  - либо отдаёшь в encoder
+            //  - копируем в staging texture
+            //  - либо отдаём в encoder
         }
     }
     Ok(())
 }))?;
 ```
----
-Что это даёт
-- окно можно двигать
-- окно можно перекрывать
-- окно можно partially offscreen
-- не будет захвата overlay
----
-план:
-1. Сделать минимальный crate capture-engine
-2. Где будет:
-- init
-- start(hwnd)
-- callback кадра
-3. Сначала просто будем считать FPS
+
+
+
