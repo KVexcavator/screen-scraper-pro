@@ -2,84 +2,123 @@ Windows Graphics Capture (WGC) - это API Windows 10+, который позв
 - отдельное окно
 - весь экран
 - регион
+Использует: D3D11, WinRT, GPU textures, Frame pool
+===
+Минимальный пример на Rust
+```toml
+windows = { version = "0.56", features = [
+    "Foundation",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_System_WinRT",
+] }
+```
+Шаг 1 — Инициализация COM
+```rust
+use windows::core::*;
+use windows::Win32::System::WinRT::RoInitialize;
+use windows::Win32::System::WinRT::RO_INIT_MULTITHREADED;
 
-Основная идея:
-OS -> GPU -> frames -> app
-Схема работы:
-Окно (HWND)
-->
-Windows Graphics Capture
-->
-DirectX texture (GPU)
-->
-(опционально)
-копия в CPU (bytes)
-->
-Slint / encoder / stream
----
-Ключевые моменты:
-1. Захват идёт на GPU
-Windows не копирует пиксели через CPU сразу. Мы получаем Direct3D texture.
-- очень быстро
-- почти без нагрузки на CPU
-- работает даже с играми и аппаратным рендером
-2.  Нужно выбрать источник:
-- HWND (окно)
-- Monitor
-- Region
-Для окна:
+unsafe {
+    RoInitialize(RO_INIT_MULTITHREADED)?;
+}
 ```
-EnumWindows -> HWND
-->
-CreateCaptureItemForWindow(hwnd)
-```
-3. Поток кадров
-После запуска StartCapture()
-Windows начинает слать:
-FrameArrived -> texture -> FrameArrived -> texture -> ...
-Обычно 30–60 FPS.
----
-Rust crate windows-capture, oн делает:
-HWND -> WGC -> texture -> bytes
-- создаёт D3D11 device
-- создаёт GraphicsCaptureItem
-- запускает frame pool
-- конвертирует в CPU buffer
----
-Архитектура windows-capture
-Window::from_title()
-->
-GraphicsCaptureItem
-->
-FramePool
-->
-callback(frame)
-->
-frame.buffer() -> &[u8]
-На выходе:
-BGRA pixels
-width
-height
-stride
-пригодно для:
-- Slint
-- ffmpeg
-- encoder
-- network
+Шаг 2 — Создание D3D11 устройства
+```rust
+use windows::Win32::Graphics::Direct3D11::*;
+use windows::Win32::Graphics::Dxgi::Common::*;
+use windows::Win32::Graphics::Direct3D::*;
 
----
-пример кода:
-```
-let window = Window::from_title("Game")?;
-let mut capture = window.start_capture(|frame| {
-    let buffer = frame.buffer()?;
-    // тут пиксели
-});
-```
-... дальше поток кадров.
+let mut device = None;
+let mut context = None;
 
+unsafe {
+    D3D11CreateDevice(
+        None,
+        D3D_DRIVER_TYPE_HARDWARE,
+        None,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        None,
+        0,
+        D3D11_SDK_VERSION,
+        &mut device,
+        std::ptr::null_mut(),
+        &mut context,
+    )?;
+}
+
+let device = device.unwrap();
+```
+Шаг 3 — Получить GraphicsCaptureItem из HWND
+тут окно изолируется от перекрытий
+```rust
+use windows::Graphics::Capture::*;
+use windows::Win32::Foundation::HWND;
+
+fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
+    unsafe {
+        let interop: IGraphicsCaptureItemInterop =
+            windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+
+        interop.CreateForWindow(hwnd)
+    }
+}
+```
+Шаг 4 — Создать FramePool
+```rust
+use windows::Graphics::DirectX::Direct3D11::*;
+use windows::Graphics::DirectX::*;
+
+let item = create_capture_item(hwnd)?;
+
+let size = item.Size()?;
+
+let d3d_device: IDirect3DDevice =
+    CreateDirect3D11DeviceFromDXGIDevice(&device.cast()?)?;
+
+let frame_pool = Direct3D11CaptureFramePool::Create(
+    &d3d_device,
+    DirectXPixelFormat::B8G8R8A8UIntNormalized,
+    2,
+    size,
+)?;
+```
+Шаг 5 — Сессия
+```rust
+let session = frame_pool.CreateCaptureSession(&item)?;
+session.StartCapture()?;
+```
+Шаг 6 — Получение кадров
+```rust
+frame_pool.FrameArrived(&TypedEventHandler::new(move |pool, _| {
+    if let Some(pool) = pool {
+        if let Ok(frame) = pool.TryGetNextFrame() {
+            let surface = frame.Surface()?;
+
+            // здесь получаешь ID3D11Texture2D
+            // дальше либо:
+            //  - копируешь в staging texture
+            //  - либо отдаёшь в encoder
+        }
+    }
+    Ok(())
+}))?;
+```
 ---
-Минимальный план:
-Windows Graphics Capture
--> поток кадров
--> показываем в Slint
+Что это даёт
+- окно можно двигать
+- окно можно перекрывать
+- окно можно partially offscreen
+- не будет захвата overlay
+---
+план:
+1. Сделать минимальный crate capture-engine
+2. Где будет:
+- init
+- start(hwnd)
+- callback кадра
+3. Сначала просто будем считать FPS

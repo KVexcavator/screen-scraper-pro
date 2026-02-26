@@ -48,3 +48,8 @@ echo 'export LIBCLANG_PATH=/usr/lib/llvm-18/lib' >> ~/.bashrc
 source ~/.bashrc
 ```
 ===
+### полезные команды:
+- отменить все изменения после коммита
+```
+git reset --hard HEAD~1
+```

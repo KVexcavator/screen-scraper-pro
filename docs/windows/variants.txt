@@ -1,57 +1,185 @@
-crate windows это низкий уровень
----
-Как OBS захватывает окно , использует 3 разных метода:
-| Метод                      | Когда используется      |
-| -------------------------- | ----------------------- |
-| Windows Graphics Capture   | Windows 10+ (основной)  |
-| Desktop Duplication (DXGI) | fallback / экран        |
-| Game Capture (hook)        | только для игр (инжект) |
----
-Windows Graphics Capture (WGC) лучший вариант
-В Rust:
-```toml
-windows = { version = "0.56", features = [
-    "Graphics_Capture",
-    "Graphics_DirectX",
-    "Graphics_DirectX_Direct3D11",
-    "Win32_UI_WindowsAndMessaging"
-]}
-```
-Пайплайн:
-
+Очень сложный долгий путь, возиться с DXGI
+===
+OBS  делает:
+1. Захват через DXGI Desktop Duplication API
+2. GPU -> GPU copy
+3. NVENC / x264 encode
+4. RTMP push
 ```
 HWND
- ↓
-CreateCaptureItemForWindow
- ↓
-FramePool
- ↓
-получаем DX11 texture
+->
+DXGI Desktop Duplication
+->
+D3D11 texture
+->
+Encoder (NVENC / x264 / AMF)
+->
+RTMP
 ```
 ---
-Готовые Rust-обёртки (проще)
-crate windows-capture:
-- захват окна по HWND
-- захват монитора
-- DX11 frames
-- callback на каждый кадр
+архитектура
+Шаг 1 — напрямую:
+- DXGI Desktop Duplication API
+- через windows crate
+- D3D11 device
+Шаг 2 — кодирование:
+Вариант А (правильный)
+Использовать ffmpeg как библиотеку, а не через CLI.
+Crate ffmpeg-next`
+Вариант B (проще)
+Кидать raw RGBA в ffmpeg subprocess:
+```bash
+ffmpeg -f rawvideo -pix_fmt rgba -s 1920x1080 -r 30 -i - ...
+```
+И через stdin пушить кадры.
+---
+план:
+реализовать DXGI duplication
+проверить raw кадры
+проверить пайп в ffmpeg subprocess
+реализовать отправку на RTMP
+====
+путь проще , вначале получать видеофайл из окна, потом:
+- воспроизводить во вьюхе
+- передавать по rmpt
+- записывать
+----
+Window -> ffmpeg -> MP4
+---
+FFmpeg умеет захватывать конкретное окно, через "-f gdigrab" или "-f dshow"
 ```rust
-use windows_capture::capture::GraphicsCapture;
+Command::new("ffmpeg")
+    .args([
+        "-f", "gdigrab",
+        "-framerate", "60",
+        "-i", "title=MyWindow",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "output.mp4",
+    ])
+    .spawn()?;
+```
+Этап 1: HWND -> ffmpeg -> MP4
+Этап 2: HWND -> ffmpeg -> RTMP
+====
+ffmpeg не умеет принимать HWND напрямую, только есть:
+-i title="..."
+-i desktop
+нет -i hwnd=123456
+---
+Шаг 1 — получить координаты окна
+```catcher.rs
+use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+use windows::Win32::Foundation::RECT;
 
-GraphicsCapture::new_window(hwnd)?.start(|frame| {
-    // frame.texture
+pub fn get_window_rect(hwnd: HWND) -> Option<(i32, i32, i32, i32)> {
+    unsafe {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).as_bool() {
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            Some((rect.left, rect.top, width, height))
+        } else {
+            None
+        }
+    }
+}
+```
+Шаг 2 — запуск ffmpeg по region
+Где:
+```
+offset_x = rect.left
+offset_y = rect.top
+video_size = width x height
+```
+Шаг 3  Rust код
+внутри on_window_selected:
+```win_ui.rs
+use std::process::Command;
+use windows_backend::catcher::get_window_rect;
+
+ui.app.on_window_selected(move |index| {
+    let windows = cache.borrow();
+    if let Some(selected) = windows.get(index as usize) {
+
+        if let Some((x, y, w, h)) = get_window_rect(selected.hwnd) {
+
+            println!("Recording HWND {:?} at {},{} size {}x{}", selected.hwnd, x, y, w, h);
+
+            Command::new("ffmpeg")
+                .args([
+                    "-y",
+                    "-f", "gdigrab",
+                    "-framerate", "60",
+                    "-offset_x", &x.to_string(),
+                    "-offset_y", &y.to_string(),
+                    "-video_size", &format!("{}x{}", w, h),
+                    "-i", "desktop",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "output.mp4",
+                ])
+                .spawn()
+                .expect("failed to start ffmpeg");
+        }
+    }
 });
 ```
+```
+HWND → RECT → desktop crop → MP4
+```
+ Важные моменты
+1. Если окно двигается — запись останется на старом месте.
+2. Если окно свернуто — будет чёрный экран.
+3. Если перекрыто — захватит перекрытие.
+
+Это ограничения `gdigrab`.
+
 ---
-Для поиска окон 
-crate: window-enumerator
-crate: winapi-ui-automation
+
+# 💪 Если хочешь реально стабильный захват окна
+
+Тогда нужно использовать:
+
+Windows Graphics Capture API
+(тот же API что использует OBS Studio)
+
+Но это уже DXGI.
+
 ---
-ловить окно и получать видео windows-capture самый близкий к OBS high-level вариант* в Rust
+
+# 🎯 Твой текущий лучший шаг
+
+Сделай сначала:
+
+```
+HWND → RECT → ffmpeg → MP4
+```
+
+Проверь:
+
+* работает ли
+* пишется ли файл
+* стабильность
+* нагрузку
+
 ---
-| Задача        | Инструмент            |
-| ------------- | --------------------- |
-| Найти окно    | windows (EnumWindows) |
-| Захват окна   | windows-capture       |
-| Захват экрана | scrap / dxgi          |
-| Как OBS       | windows-capture + WGC |
+
+# ❓ Дальше что?
+
+Когда это заработает, мы можем:
+
+1. Сделать кнопку Stop
+2. Сделать запись в уникальный файл
+3. Сделать live preview через чтение файла
+4. Сделать прямой RTMP вместо MP4
+
+---
+
+Скажи:
+
+* ты хочешь сейчас просто запись?
+* или сразу переключаться на запись + live preview внутри Slint?
+
+
+
