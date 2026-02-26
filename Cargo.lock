@@ -235,6 +235,7 @@ dependencies = [
  "linux-backend",
  "screen-ui",
  "slint",
+ "windows 0.58.0",
  "windows-backend",
 ]
 

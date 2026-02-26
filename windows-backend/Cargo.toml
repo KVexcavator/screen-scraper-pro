@@ -17,4 +17,5 @@ windows = { version = "0.58", features = [
     "Win32_System_WinRT_Direct3D11",
     "Graphics_DirectX_Direct3D11",
     "Win32_System_WinRT_Graphics_Capture",
+    "Win32_System_Threading",
 ] }

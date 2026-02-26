@@ -1,19 +1,18 @@
 #![cfg(target_os = "windows")]
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use windows::Foundation::TypedEventHandler;
 use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::IInspectable;
+use windows::Graphics::DirectX::DirectXPixelFormat;
 
 use windows::{
     Graphics::Capture::*,
     Graphics::DirectX::Direct3D11::*,
-    Graphics::DirectX::*,
     Win32::{
         Foundation::HWND,
         Graphics::{Direct3D::*, Direct3D11::*, Dxgi::*},
         System::WinRT::*,
+        UI::WindowsAndMessaging::*,
     },
     core::*,
 };
@@ -24,9 +23,7 @@ pub struct CaptureEngine {
 
 impl CaptureEngine {
     pub fn init() -> Result<Self> {
-        unsafe {
-            RoInitialize(RO_INIT_MULTITHREADED)?;
-        }
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED)?; }
 
         let mut device: Option<ID3D11Device> = None;
         let mut context: Option<ID3D11DeviceContext> = None;
@@ -46,22 +43,21 @@ impl CaptureEngine {
         }
 
         let device = device.unwrap();
-
         let dxgi_device: IDXGIDevice = device.cast()?;
-        let inspectable: IInspectable =
-            unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
+        let inspectable: IInspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
         let d3d_device: IDirect3DDevice = inspectable.cast()?;
 
         Ok(Self { d3d_device })
     }
 
     pub fn start<F>(&self, hwnd: HWND, mut on_frame: F) -> Result<()>
-    where
-        F: FnMut() + Send + 'static,
+    where F: FnMut() + Send + 'static,
     {
-        let item = create_capture_item(hwnd)?;
+        println!("Starting capture for HWND: {:?}", hwnd.0);
 
+        let item = create_capture_item(hwnd)?;
         let size = item.Size()?;
+        println!("✓ Capture size: {:?}", size);
 
         let frame_pool = Direct3D11CaptureFramePool::Create(
             &self.d3d_device,
@@ -72,42 +68,59 @@ impl CaptureEngine {
 
         let session = frame_pool.CreateCaptureSession(&item)?;
         session.StartCapture()?;
+        println!("✓ Session started");
 
-        let fps_counter = Arc::new(Mutex::new((0u32, Instant::now())));
-
-        frame_pool.FrameArrived(
+        let _token = frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
-                let fps_counter = fps_counter.clone();
-
-                move |pool: &Option<Direct3D11CaptureFramePool>, _| {
-                    if let Some(pool) = pool
-                        && let Ok(_frame) = pool.TryGetNextFrame()
-                    {
-                        let mut data = fps_counter.lock().unwrap();
-                        data.0 += 1;
-
-                        if data.1.elapsed() >= Duration::from_secs(1) {
-                            println!("FPS: {}", data.0);
-                            data.0 = 0;
-                            data.1 = Instant::now();
+                println!("✓ FrameArrived registered");
+                move |pool_opt: &Option<Direct3D11CaptureFramePool>, _| {
+                    println!("✓ Event fired!");
+                    if let Some(pool) = pool_opt {
+                        match pool.TryGetNextFrame() {
+                            Ok(frame) => {
+                                match frame.ContentSize() {
+                                    Ok(content_size) => {
+                                        println!("🚀 FRAME: {}x{}",
+                                                 content_size.Width,
+                                                 content_size.Height
+                                        );
+                                        on_frame();
+                                    }
+                                    Err(e) => println!("✗ ContentSize error: {:?}", e),
+                                }
+                            }
+                            Err(e) => println!("✗ No frame: {:?}", e),
                         }
-
-                        on_frame();
                     }
                     Ok(())
                 }
-            }),
+            })
         )?;
 
-        Ok(())
+        // Message pump для MTA WinRT
+        loop {
+            unsafe {
+                let mut msg = std::mem::MaybeUninit::<MSG>::uninit();
+                let pmsg = msg.as_mut_ptr();
+
+                if GetMessageW(pmsg, HWND(std::ptr::null_mut()), 0, 0).as_bool() {
+                    let msg_filled = msg.assume_init();
+                    TranslateMessage(&msg_filled as *const _);
+                    DispatchMessageW(&msg_filled as *const _);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
     }
 }
 
 fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
+    println!("Creating capture item for HWND: {:?}", hwnd.0);
     unsafe {
         let interop: IGraphicsCaptureItemInterop =
             windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
-
+        println!("✓ Capture item created");
         interop.CreateForWindow(hwnd)
     }
 }

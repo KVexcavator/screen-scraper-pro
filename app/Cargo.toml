@@ -12,3 +12,6 @@ linux-backend = { path = "../linux-backend" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-backend = { path = "../windows-backend" }
+windows = { version = "0.58", features = [
+    "Foundation",
+] }
