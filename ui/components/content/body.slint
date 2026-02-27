@@ -1,25 +1,48 @@
-import { Button } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { VideoView } from "video.slint";
 
-export component BodyView inherits VerticalLayout {
+export component BodyView inherits Rectangle {
+    background: #f5f5f5;
+
     in property <[string]> titles;
     in property <bool> show_modal_list;
     in property <image> preview;
 
     callback item_selected(index: int);
 
-    // если модалка — показываем список
-    if show_modal_list: VerticalLayout {
-        spacing: 4px;
+    // ===== СПИСОК =====
+    if show_modal_list: ScrollView {
+        width: 100%;
+        height: 100%;
 
-        for title[i] in titles: Button {
-            text: title;
-            clicked => item_selected(i);
+        VerticalLayout {
+            spacing: 0px;
+
+            for title[i] in titles: Rectangle {
+                height: 56px;
+                background: #ffffff;
+
+                Text {
+                    text: title;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                    x: 16px;        // отступ слева
+                    width: parent.width - 16px;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.item_selected(i);
+                    }
+                }
+            }
         }
     }
 
-    // если нет модалки — видео
+    // ===== ВИДЕО =====
     if !show_modal_list: VideoView {
+        width: 100%;
+        height: 100%;
         preview: root.preview;
     }
 }

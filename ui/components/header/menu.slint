@@ -1,26 +1,59 @@
 import { Button } from "std-widgets.slint";
 
 export component Menu inherits Rectangle {
-    height: 44px;
     background: #3a3a3a;
 
     callback select_clicked();
+    callback toggle_menu();
+    in property <bool> modal_list_open;
 
-    HorizontalLayout {
+    VerticalLayout {
         spacing: 12px;
-        padding-left: 12px;
-        padding-right: 12px;
+        padding: 12px;
+        alignment: stretch;
 
+        // Заголовок
         Text {
             text: "SOME TEXT";
             color: #ff9800;
-            font-size: 18px;
+            font-size: root.width > 60px ? 18px : 14px;
+            horizontal-alignment: center;
             vertical-alignment: center;
+            min-height: 44px;
         }
 
-        Button {
-            text: "Select Window";
-            clicked => select_clicked();
+        // Toggle кнопка
+        Rectangle {
+            height: 44px;
+
+            toggle_text := Text {
+                text: root.width > 60px ? "◀" : "▶";
+                font-size: 20px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+            }
+
+            ta := TouchArea {
+                clicked => {
+                    root.toggle_menu();
+                }
+            }
+        }
+
+        // Кнопка показывается только в развернутом виде
+        if root.width > 60px: Button {
+            text: root.modal_list_open ? "Collapse" : "Select Window";
+            min-height: 44px;
+            clicked => {
+                root.select_clicked();
+            }
+        }
+
+        // Spacer
+        Rectangle {
+            height: 100%;
         }
     }
 }
