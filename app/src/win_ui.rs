@@ -63,28 +63,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(cmd) = cmd_rx.recv() {
             match cmd {
                 CaptureCommand::Start(hwnd_value) => {
-                    if let Some(flag) = &running_flag {
-                        flag.store(false, Ordering::SeqCst);
-                    }
-
-                    let hwnd = HWND(hwnd_value as _);
+                    let hwnd_value = hwnd_value; // уже isize
 
                     let running = Arc::new(AtomicBool::new(true));
                     running_flag = Some(running.clone());
 
                     let frame_tx_clone = frame_tx.clone();
 
-                    if engine.is_none() {
-                        engine = Some(CaptureEngine::init().unwrap());
-                    }
+                    std::thread::spawn(move || {
+                        let hwnd = HWND(hwnd_value as _); // создаём тут
 
-                    if let Some(engine_ref) = engine.as_mut() {
-                        engine_ref
-                            .start_with_flag(hwnd, running, move |w, h, data| {
+                        let mut engine = CaptureEngine::init().unwrap();
+
+                        engine
+                            .start(hwnd, running, move |w, h, data| {
                                 frame_tx_clone.send((w, h, data)).ok();
                             })
                             .ok();
-                    }
+                    });
                 }
 
                 CaptureCommand::Stop => {

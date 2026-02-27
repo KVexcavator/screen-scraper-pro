@@ -66,11 +66,10 @@ impl CaptureEngine {
 
     pub fn stop(&self) -> Result<()> {
         self.running.store(false, Ordering::SeqCst);
-        eprintln!("Stopping capture engine ==================>>>>>>>>>>>>");
         Ok(())
     }
 
-    pub fn start_with_flag<F>(
+    pub fn start<F>(
         &mut self,
         hwnd: HWND,
         running: Arc<AtomicBool>,
@@ -79,6 +78,8 @@ impl CaptureEngine {
     where
         F: FnMut(u32, u32, Vec<u8>) + Send + 'static,
     {
+        self.stop()?;
+        // Шаг 4 — Создать FramePool
         let item = create_capture_item(hwnd)?;
         let size = item.Size()?;
 
@@ -89,20 +90,30 @@ impl CaptureEngine {
             size,
         )?;
 
+        // Шаг 5 — Сессия
         let session = frame_pool.CreateCaptureSession(&item)?;
         session.StartCapture()?;
 
+        // Шаг 6 — Получение кадров
         let _token = frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(
                 move |pool: &Option<Direct3D11CaptureFramePool>, _| {
                     if let Some(pool) = pool {
                         if let Ok(frame) = pool.TryGetNextFrame() {
                             if let Ok(size) = frame.ContentSize() {
+                                // TODO create videofile
+                                // понять что еще есть вo frame
+                                // например frame.Surface()
+                                // как получать ID3D11Texture2D
+                                // дальше либо:
+                                //  - копировать в staging texture
+                                //  - отдавать в encoder
                                 if let (Ok(w), Ok(h)) = (
                                     u32::try_from(size.Width),
                                     u32::try_from(size.Height),
                                 ) {
                                     println!("FRAME: {}x{}", w, h);
+                                    // передаем белый шум
                                     let fake = vec![255u8; (w * h * 4) as usize];
                                     on_frame(w, h, fake);
                                     // on_frame(w, h, vec![]);
@@ -115,6 +126,7 @@ impl CaptureEngine {
             ),
         )?;
 
+        // Message pump для MTA WinRT
         while running.load(Ordering::SeqCst) {
             unsafe {
                 let mut msg = std::mem::MaybeUninit::<MSG>::uninit();
@@ -136,73 +148,6 @@ impl CaptureEngine {
 
         Ok(())
     }
-
-    // pub fn start<F>(&self, hwnd: HWND, mut on_frame: F) -> Result<()>
-    // where F: FnMut() + Send + 'static,
-    // {
-    //     self.stop()?;
-    //     // Шаг 4 — Создать FramePool
-    //     let item = create_capture_item(hwnd)?;
-    //     let size = item.Size()?;
-    //
-    //     let frame_pool = Direct3D11CaptureFramePool::Create(
-    //         &self.d3d_device,
-    //         DirectXPixelFormat::B8G8R8A8UIntNormalized,
-    //         2,
-    //         size,
-    //     )?;
-    //
-    //     // Шаг 5 — Сессия
-    //     let session = frame_pool.CreateCaptureSession(&item)?;
-    //     session.StartCapture()?;
-    //
-    //     // Шаг 6 — Получение кадров
-    //     let _token = frame_pool.FrameArrived(
-    //         &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
-    //             move |pool_opt: &Option<Direct3D11CaptureFramePool>, _| {
-    //                 if let Some(pool) = pool_opt {
-    //                     match pool.TryGetNextFrame() {
-    //                         Ok(frame) => {
-    //                             // TODO create videofile
-    //                             // понять что еще есть вo frame
-    //                             // например frame.Surface()
-    //                             // как получать ID3D11Texture2D
-    //                             // дальше либо:
-    //                             //  - копировать в staging texture
-    //                             //  - отдавать в encoder
-    //                             match frame.ContentSize() {
-    //                                 Ok(size) => {
-    //                                     println!("FRAME: {}x{}", size.Width, size.Height);
-    //                                     on_frame();
-    //                                 }
-    //                                 Err(e) => println!("ContentSize error: {:?}", e),
-    //                             }
-    //                         }
-    //                         Err(e) => println!("No frame: {:?}", e),
-    //                     }
-    //                 }
-    //                 Ok(())
-    //             }
-    //         })
-    //     )?;
-    //
-    //     // Message pump для MTA WinRT
-    //     loop {
-    //         unsafe {
-    //             let mut msg = std::mem::MaybeUninit::<MSG>::uninit();
-    //             let pmsg = msg.as_mut_ptr();
-    //
-    //             if GetMessageW(pmsg, HWND(std::ptr::null_mut()), 0, 0).as_bool() {
-    //                 let msg_filled = msg.assume_init();
-    //                 #[allow(unused)]
-    //                 TranslateMessage(&msg_filled as *const _);
-    //                 DispatchMessageW(&msg_filled as *const _);
-    //             }
-    //         }
-    //         std::thread::sleep(std::time::Duration::from_millis(10));
-    //     }
-    //
-    // }
 }
 
 // Шаг 3 — Получить GraphicsCaptureItem из HWND
