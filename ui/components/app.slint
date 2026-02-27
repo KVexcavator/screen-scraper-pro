@@ -14,6 +14,7 @@ export component AppWindow inherits Window {
     property <bool> menu_expanded: false;
     property <length> menu_width: menu_expanded ? 200px : 44px;
     animate menu_width { duration: 200ms; easing: ease; }
+    callback stop_capture();
 
     // модалка список доступных окон
     in property <[string]> titles;
@@ -41,6 +42,10 @@ export component AppWindow inherits Window {
 
             toggle_menu => {
                 root.menu_expanded = !root.menu_expanded;
+            }
+
+            stop_clicked => {
+                root.stop_capture();
             }
         }
 
