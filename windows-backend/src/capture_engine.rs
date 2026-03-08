@@ -2,27 +2,36 @@
 // для захвата отдельного окна, всего экрана, региона
 // Использует: D3D11, WinRT, GPU textures, Frame pool
 #![cfg(target_os = "windows")]
-use windows::Foundation::TypedEventHandler;
-use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
-use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
-use windows::core::IInspectable;
-use windows::Graphics::DirectX::DirectXPixelFormat;
-
-use windows::{
-    Graphics::Capture::*,
-    Graphics::DirectX::Direct3D11::*,
-    Win32::{
-        Foundation::HWND,
-        Graphics::{Direct3D::*, Direct3D11::*, Dxgi::*},
-        System::WinRT::*,
-        UI::WindowsAndMessaging::*,
-    },
-    core::*,
-};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use windows::{
+    core::*,
+    Foundation::TypedEventHandler,
+    Graphics::{
+        Capture::*,
+        DirectX::{DirectXPixelFormat, Direct3D11::*},
+    },
+    Win32::{
+        Foundation::HWND,
+        Graphics::{
+            Direct3D::*,
+            Direct3D11::*,
+            Dxgi::*,
+        },
+        System::WinRT::{
+            Direct3D11::{
+                CreateDirect3D11DeviceFromDXGIDevice,
+                IDirect3DDxgiInterfaceAccess,
+            },
+            Graphics::Capture::IGraphicsCaptureItemInterop,
+            *,
+        },
+        UI::WindowsAndMessaging::*,
+    },
+};
+use windows::core::IInspectable;
 
 pub struct CaptureEngine {
     d3d_device: IDirect3DDevice,
@@ -100,23 +109,33 @@ impl CaptureEngine {
                 move |pool: &Option<Direct3D11CaptureFramePool>, _| {
                     if let Some(pool) = pool {
                         if let Ok(frame) = pool.TryGetNextFrame() {
-                            if let Ok(size) = frame.ContentSize() {
-                                // TODO create videofile
-                                // понять что еще есть вo frame
-                                // например frame.Surface()
-                                // как получать ID3D11Texture2D
-                                // дальше либо:
-                                //  - копировать в staging texture
-                                //  - отдавать в encoder
-                                if let (Ok(w), Ok(h)) = (
-                                    u32::try_from(size.Width),
-                                    u32::try_from(size.Height),
-                                ) {
-                                    println!("FRAME: {}x{}", w, h);
-                                    // передаем белый шум
-                                    let fake = vec![255u8; (w * h * 4) as usize];
-                                    on_frame(w, h, fake);
-                                    // on_frame(w, h, vec![]);
+
+                            if let Ok(surface) = frame.Surface() {
+
+                                match get_texture_from_surface(&surface) {
+
+                                    Ok(texture) => {
+
+                                        let mut desc = D3D11_TEXTURE2D_DESC::default();
+
+                                        unsafe {
+                                            texture.GetDesc(&mut desc);
+                                        }
+
+                                        println!(
+                                            "TEXTURE: {}x{}  format={:?}  mip_levels={}  usage={:?}",
+                                            desc.Width,
+                                            desc.Height,
+                                            desc.Format,
+                                            desc.MipLevels,
+                                            desc.Usage
+                                        );
+
+                                    }
+
+                                    Err(e) => {
+                                        eprintln!("Texture cast failed: {:?}", e);
+                                    }
                                 }
                             }
                         }
@@ -157,5 +176,13 @@ fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
         let interop: IGraphicsCaptureItemInterop =
             windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         interop.CreateForWindow(hwnd)
+    }
+}
+
+fn get_texture_from_surface(surface: &IDirect3DSurface) -> Result<ID3D11Texture2D> {
+    unsafe {
+        let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
+        let texture: ID3D11Texture2D = access.GetInterface()?;
+        Ok(texture)
     }
 }
