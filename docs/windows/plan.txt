@@ -1,4 +1,4 @@
-выше мы обсуждали что надо:
-1. получить текстуры ID3D11Texture2D
-2. создать CPU-readable texture
-3. ffmpeg pipe
+это план:
+1. сделано: получить текстуры ID3D11Texture2D
+2. делаем сейчас: создать CPU-readable texture (и кучу отладочной информайии)
+3. планируем: ffmpeg pipe

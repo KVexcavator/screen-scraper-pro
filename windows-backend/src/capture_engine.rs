@@ -109,33 +109,26 @@ impl CaptureEngine {
                 move |pool: &Option<Direct3D11CaptureFramePool>, _| {
                     if let Some(pool) = pool {
                         if let Ok(frame) = pool.TryGetNextFrame() {
-
                             if let Ok(surface) = frame.Surface() {
-
-                                match get_texture_from_surface(&surface) {
-
+                                match get_raw_textures(&surface) {
                                     Ok(texture) => {
+                                        match get_readable_textures(&texture) {
 
-                                        let mut desc = D3D11_TEXTURE2D_DESC::default();
+                                            Ok((w, h, pixels)) => {
 
-                                        unsafe {
-                                            texture.GetDesc(&mut desc);
+                                                println!(
+                                                    "FRAME CPU {}x{} bytes={}",
+                                                    w,
+                                                    h,
+                                                    pixels.len()
+                                                );
+
+                                                on_frame(w, h, pixels);
+                                            }
+                                            Err(e) => { eprintln!("Readable textures failed {:?}", e); }
                                         }
-
-                                        println!(
-                                            "TEXTURE: {}x{}  format={:?}  mip_levels={}  usage={:?}",
-                                            desc.Width,
-                                            desc.Height,
-                                            desc.Format,
-                                            desc.MipLevels,
-                                            desc.Usage
-                                        );
-
                                     }
-
-                                    Err(e) => {
-                                        eprintln!("Texture cast failed: {:?}", e);
-                                    }
+                                    Err(e) => { eprintln!("Raw textures failed: {:?}", e); }
                                 }
                             }
                         }
@@ -179,10 +172,91 @@ fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
     }
 }
 
-fn get_texture_from_surface(surface: &IDirect3DSurface) -> Result<ID3D11Texture2D> {
+fn get_raw_textures(surface: &IDirect3DSurface) -> Result<ID3D11Texture2D> {
     unsafe {
         let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
         let texture: ID3D11Texture2D = access.GetInterface()?;
         Ok(texture)
+    }
+}
+
+fn get_readable_textures(
+    texture: &ID3D11Texture2D,
+) -> Result<(u32, u32, Vec<u8>)> {
+
+    unsafe {
+        // get device
+        let device: ID3D11Device = texture.GetDevice()?;
+        // get context
+        let context: ID3D11DeviceContext = device.GetImmediateContext()?;
+        // get description of texture
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        texture.GetDesc(&mut desc);
+
+        println!("SOURCE texture {:?}", desc);
+
+        // create staging descriptor
+        let mut staging_desc = desc;
+        staging_desc.BindFlags = 0;
+        staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+        staging_desc.Usage = D3D11_USAGE_STAGING;
+        staging_desc.MiscFlags = 0;
+
+        // staging texture
+        let mut staging: Option<ID3D11Texture2D> = None;
+
+        device.CreateTexture2D(
+            &staging_desc,
+            None,
+            Some(&mut staging)
+        )?;
+
+        let staging = staging.unwrap();
+
+        // copy GPU -> CPU texture
+        context.CopyResource(&staging, texture);
+
+        // Map
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+
+        context.Map(
+            &staging,
+            0,
+            D3D11_MAP_READ,
+            0,
+            Some(&mut mapped)
+        )?;
+
+        let width = desc.Width;
+        let height = desc.Height;
+
+        let row_pitch = mapped.RowPitch as usize;
+
+        println!(
+            "Mapped memory row_pitch={} expected_row={}",
+            row_pitch,
+            width as usize * 4
+        );
+
+        let mut data = vec![0u8; (width * height * 4) as usize];
+
+        let src = mapped.pData as *const u8;
+
+        for y in 0..height as usize {
+
+            let src_row = src.add(y * row_pitch);
+
+            let dst_row = data.as_mut_ptr().add(y * width as usize * 4);
+
+            std::ptr::copy_nonoverlapping(
+                src_row,
+                dst_row,
+                width as usize * 4,
+            );
+        }
+
+        context.Unmap(&staging, 0);
+
+        Ok((width, height, data))
     }
 }

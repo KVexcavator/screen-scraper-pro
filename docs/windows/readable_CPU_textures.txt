@@ -1,0 +1,64 @@
+Что значит CPU-readable texture
+Сечас мы получаем
+ID3D11Texture2D
+usage = D3D11_USAGE_DEFAULT
+текстура лежит в видеопамяти видеокарты и CPU её не может читать
+код типа let pixels: Vec<u8> получить напрямую невозможно
+
+Нужно сделать копию текстуры в специальную staging texture
+у новой текстуры должен быть такой descriptor:
+```
+Usage = D3D11_USAGE_STAGING
+CPUAccessFlags = D3D11_CPU_ACCESS_READ
+BindFlags = 0
+```
+```capture_engine.rs
+fn get_readable_textures( texture: &ID3D11Texture2D ) -> Result<(u32, u32, Vec<u8>)> {
+    unsafe {
+        // get device
+        let device: ID3D11Device = texture.GetDevice()?;
+        // get context
+        let context: ID3D11DeviceContext = device.GetImmediateContext()?;
+        // get description of texture
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        texture.GetDesc(&mut desc);
+        // create staging descriptor
+        let mut staging_desc = desc;
+        staging_desc.BindFlags = 0;
+        staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+        staging_desc.Usage = D3D11_USAGE_STAGING;
+        staging_desc.MiscFlags = 0;
+
+        // staging texture
+        let mut staging: Option<ID3D11Texture2D> = None;
+
+        device.CreateTexture2D(
+            &staging_desc,
+            None,
+            Some(&mut staging)
+        )?;
+
+        let staging = staging.unwrap();
+
+        // copy GPU -> CPU texture
+        context.CopyResource(&staging, texture);
+
+        // Map
+        et mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        context.Map(
+        ...
+    }
+}
+```
+```
+увидел в терминале:
+```
+Mapped memory row_pitch=7680 expected_row=7680
+FRAME CPU 1920x1032 bytes=7925760
+SOURCE texture D3D11_TEXTURE2D_DESC { Width: 1920, Height: 1032, MipLevels: 1, ArraySize: 1, Format: DXGI_FORMAT(87), SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 }, Usage: D3D11_USAGE(0), BindFlags: 40, CPUAccessFlags: 0, MiscFlags: 2050 }
+```
+идеально 1920 * 1032 * 4 = 7 937 280
+после этого появится Vec<u8> формата BGRA BGRA BGRA
+```
+============
+дальше ffmpeg pipe
