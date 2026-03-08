@@ -77,6 +77,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                         engine
                             .start(hwnd, running, move |w, h, data| {
+                                println!("FRAME {}x{} bytes={}", w, h, data.len());
                                 frame_tx_clone.send((w, h, data)).ok();
                             })
                             .ok();
