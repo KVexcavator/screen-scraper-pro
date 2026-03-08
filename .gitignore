@@ -1,5 +1,6 @@
 /target
 /notes
+.idea
 .qodo
 .vscode
 Cargo.lock
