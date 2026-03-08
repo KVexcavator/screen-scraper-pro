@@ -1,0 +1,12 @@
+export component VideoView inherits Rectangle {
+    in property <image> preview;
+
+    background: #FFD580;
+
+    Image {
+        source: preview;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+}

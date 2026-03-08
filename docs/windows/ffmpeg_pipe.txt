@@ -1,0 +1,369 @@
+у меня есть работающая поимка белого шума
+это исходник с которого мы сейчас начнем,
+канечный результат, запись видео в файл
+```app/src/win_ui.rs
+use screen_ui::UiHandle;
+use screen_ui::*;
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use windows_backend::capture_engine::CaptureEngine;
+use windows_backend::catcher::{WindowInfo, get_windows};
+use windows::Win32::Foundation::HWND;
+
+enum CaptureCommand {
+    Start(isize),
+    Stop,
+    Exit,
+}
+
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let ui = UiHandle::new()?;
+
+    // Обновление списка окон
+    let windows_cache = Arc::new(Mutex::new(Vec::<WindowInfo>::new()));
+    {
+        let cache = windows_cache.clone();
+        let ui_ref = ui.app.as_weak();
+        ui.app.on_request_titles(move || {
+            let windows = get_windows();
+            let titles: Vec<SharedString> =
+                windows.iter().map(|w| SharedString::from(&w.title)).collect();
+
+            *cache.lock().unwrap() = windows;
+
+            if let Some(app) = ui_ref.upgrade() {
+                app.set_titles((&titles[..]).into());
+            }
+        });
+    }
+
+    // Поток для UI отображения кадров
+    let ui_weak = ui.app.as_weak();
+    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Vec<u8>)>();
+    thread::spawn(move || {
+        while let Ok((w, h, data)) = frame_rx.recv() {
+            let ui_weak = ui_weak.clone();
+            slint::invoke_from_event_loop(move || {
+                if let Some(app) = ui_weak.upgrade() {
+                    let buffer =
+                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
+                    let image = Image::from_rgba8(buffer);
+                    app.set_preview(image);
+                }
+            }).ok();
+        }
+    });
+
+    // Worker поток для команд(CaptureCommand)
+    let (cmd_tx, cmd_rx) = mpsc::channel::<CaptureCommand>();
+    thread::spawn(move || {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let mut engine: Option<CaptureEngine> = None;
+        let mut running_flag: Option<Arc<AtomicBool>> = None;
+
+        while let Ok(cmd) = cmd_rx.recv() {
+            match cmd {
+                CaptureCommand::Start(hwnd_value) => {
+                    let hwnd_value = hwnd_value; // уже isize
+
+                    let running = Arc::new(AtomicBool::new(true));
+                    running_flag = Some(running.clone());
+
+                    let frame_tx_clone = frame_tx.clone();
+
+                    std::thread::spawn(move || {
+                        let hwnd = HWND(hwnd_value as _); // создаём тут
+
+                        let mut engine = CaptureEngine::init().unwrap();
+
+                        engine
+                            .start(hwnd, running, move |w, h, data| {
+                                frame_tx_clone.send((w, h, data)).ok();
+                            })
+                            .ok();
+                    });
+                }
+
+                CaptureCommand::Stop => {
+                    if let Some(flag) = &running_flag {
+                        flag.store(false, Ordering::SeqCst);
+                    }
+                    running_flag = None;
+                }
+
+                CaptureCommand::Exit => break,
+            }
+        }
+    });
+
+    // Обработчик выбора окна
+    // фрейм стартует при выборе
+    {
+        let cache = windows_cache.clone();
+        let tx = cmd_tx.clone();
+
+        ui.app.on_window_selected(move |index| {
+            let windows = cache.lock().unwrap();
+            if let Some(selected) = windows.get(index as usize) {
+                let hwnd_value = selected.hwnd.0 as isize;
+                tx.send(CaptureCommand::Start(hwnd_value)).ok();
+            }
+        });
+    }
+
+    // Обработчик остановки фрейма
+    {
+        let tx = cmd_tx.clone();
+
+        ui.app.on_stop_capture(move || {
+            tx.send(CaptureCommand::Stop).ok();
+            eprintln!("Button click STOP capture ==================>>>>>>>>>>>>");
+        });
+    }
+
+    ui.app.run()?;
+    Ok(())
+}
+```
+```windows-backend/src/capture_engine.rs
+// Windows Graphics Capture (WGC) - это API Windows 10+,
+// для захвата отдельного окна, всего экрана, региона
+// Использует: D3D11, WinRT, GPU textures, Frame pool
+#![cfg(target_os = "windows")]
+use windows::Foundation::TypedEventHandler;
+use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice;
+use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
+use windows::core::IInspectable;
+use windows::Graphics::DirectX::DirectXPixelFormat;
+
+use windows::{
+    Graphics::Capture::*,
+    Graphics::DirectX::Direct3D11::*,
+    Win32::{
+        Foundation::HWND,
+        Graphics::{Direct3D::*, Direct3D11::*, Dxgi::*},
+        System::WinRT::*,
+        UI::WindowsAndMessaging::*,
+    },
+    core::*,
+};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+pub struct CaptureEngine {
+    d3d_device: IDirect3DDevice,
+    running: Arc<AtomicBool>,
+}
+
+impl CaptureEngine {
+    pub fn init() -> Result<Self> {
+        // Шаг 1 — Инициализация COM
+        // unsafe { RoInitialize(RO_INIT_MULTITHREADED)?; }
+        // может работать лучше
+        unsafe { RoInitialize(RO_INIT_SINGLETHREADED)?; }
+
+        // Шаг 2 — Создание D3D11 устройства
+        let mut device: Option<ID3D11Device> = None;
+        let mut context: Option<ID3D11DeviceContext> = None;
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                None,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )?;
+        }
+
+        let device = device.unwrap();
+        let dxgi_device: IDXGIDevice = device.cast()?;
+        let inspectable: IInspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
+        let d3d_device: IDirect3DDevice = inspectable.cast()?;
+
+        Ok(Self {
+            d3d_device,
+            running: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    pub fn stop(&self) -> Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub fn start<F>(
+        &mut self,
+        hwnd: HWND,
+        running: Arc<AtomicBool>,
+        mut on_frame: F,
+    ) -> Result<()>
+    where
+        F: FnMut(u32, u32, Vec<u8>) + Send + 'static,
+    {
+        self.stop()?;
+        // Шаг 4 — Создать FramePool
+        let item = create_capture_item(hwnd)?;
+        let size = item.Size()?;
+
+        let frame_pool = Direct3D11CaptureFramePool::Create(
+            &self.d3d_device,
+            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            2,
+            size,
+        )?;
+
+        // Шаг 5 — Сессия
+        let session = frame_pool.CreateCaptureSession(&item)?;
+        session.StartCapture()?;
+
+        // Шаг 6 — Получение кадров
+        let _token = frame_pool.FrameArrived(
+            &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(
+                move |pool: &Option<Direct3D11CaptureFramePool>, _| {
+                    if let Some(pool) = pool {
+                        if let Ok(frame) = pool.TryGetNextFrame() {
+                            if let Ok(size) = frame.ContentSize() {
+                                // TODO create videofile
+                                // понять что еще есть вo frame
+                                // например frame.Surface()
+                                // как получать ID3D11Texture2D
+                                // дальше либо:
+                                //  - копировать в staging texture
+                                //  - отдавать в encoder
+                                if let (Ok(w), Ok(h)) = (
+                                    u32::try_from(size.Width),
+                                    u32::try_from(size.Height),
+                                ) {
+                                    println!("FRAME: {}x{}", w, h);
+                                    // передаем белый шум
+                                    let fake = vec![255u8; (w * h * 4) as usize];
+                                    on_frame(w, h, fake);
+                                    // on_frame(w, h, vec![]);
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            ),
+        )?;
+
+        // Message pump для MTA WinRT
+        while running.load(Ordering::SeqCst) {
+            unsafe {
+                let mut msg = std::mem::MaybeUninit::<MSG>::uninit();
+                let pmsg = msg.as_mut_ptr();
+
+                if PeekMessageW(pmsg, HWND(std::ptr::null_mut()), 0, 0, PM_REMOVE).as_bool() {
+                    let msg = msg.assume_init();
+                    #[allow(unused)]
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        session.Close()?;
+        frame_pool.Close()?;
+
+        Ok(())
+    }
+}
+
+// Шаг 3 — Получить GraphicsCaptureItem из HWND
+// тут окно изолируется от перекрытий
+fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
+    unsafe {
+        let interop: IGraphicsCaptureItemInterop =
+            windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        interop.CreateForWindow(hwnd)
+    }
+}
+```
+```ui/components/header/menu.slint
+import { Button } from "std-widgets.slint";
+
+export component Menu inherits Rectangle {
+    background: #3a3a3a;
+
+    callback select_clicked();
+    callback toggle_menu();
+    in property <bool> modal_list_open;
+    callback stop_clicked();
+
+    VerticalLayout {
+        spacing: 12px;
+        padding: 12px;
+        alignment: stretch;
+
+        // Заголовок
+        if root.width > 60px: Text {
+            text: "SOME TEXT";
+            color: #ff9800;
+            font-size: root.width > 60px ? 18px : 14px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            min-height: 44px;
+        }
+
+        // Toggle кнопка
+        Rectangle {
+            height: 44px;
+
+            toggle_text := Text {
+                text: root.width > 60px ? "◀" : "▶";
+                font-size: 20px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+            }
+
+            ta := TouchArea {
+                clicked => {
+                    root.toggle_menu();
+                }
+            }
+        }
+
+        // Кнопка показывается только в развернутом виде
+        if root.width > 60px: Button {
+            text: root.modal_list_open ? "Collapse" : "Select Window";
+            min-height: 44px;
+            clicked => {
+                root.select_clicked();
+            }
+        }
+
+        if root.width > 60px: Button {
+            text: "Stop Capture";
+            min-height: 44px;
+            clicked => root.stop_clicked();
+        }
+
+        // Spacer
+        Rectangle {
+            height: 100%;
+        }
+    }
+}
+```
+выше мы обсуждали что надо:
+1. получить ID3D11Texture2D
+2. создать CPU-readable texture
+3. ffmpeg pipe
+
+давай идти маленькими шагами
+сейчас пробуем получить ID3D11Texture2D и отладочные сообщения, вместо ширины и высоты
+хорошо подумай и подсказвай

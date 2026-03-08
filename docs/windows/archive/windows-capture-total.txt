@@ -1,0 +1,206 @@
+сейчас я могу видеть белый тестовый экран(понимаем что это лажа все)
+```windows-backend/Cargo.toml
+[package]
+name = "windows-backend"
+version = "0.1.0"
+edition = "2024"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-capture = "1.5.0"
+```
+``windows-backend/src/capture.rs
+use std::sync::mpsc::Sender;
+use windows::Win32::Foundation::HWND;
+
+pub fn start_capture(
+    hwnd: HWND,
+    sender: Sender<(u32, u32, Vec<u8>)>,
+) {
+    std::thread::spawn(move || {
+        // здесь будет windows-capture
+        // пока тест: фейковый кадр
+
+        let width = 800;
+        let height = 600;
+        let data = vec![255u8; (width * height * 4) as usize];
+
+        loop {
+            sender.send((width, height, data.clone())).ok();
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+    });
+}
+```windows-backend/src/catcher.rs
+#![cfg(target_os = "windows")]
+use windows::{
+    Win32::{
+        Foundation::{BOOL, HWND, LPARAM},
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowTextLengthW, GetWindowTextW, IsWindowVisible,
+        },
+    },
+};
+
+pub struct WindowInfo {
+    pub title: String,
+    pub hwnd: HWND,
+}
+
+pub fn get_windows() -> Vec<WindowInfo> {
+    let mut windows = Vec::new();
+
+    unsafe {
+        EnumWindows(
+            Some(enum_windows_proc),
+            LPARAM(&mut windows as *mut _ as isize),
+        ).unwrap();
+    }
+
+    windows
+}
+
+extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+        let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
+
+        if !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
+
+        let length = GetWindowTextLengthW(hwnd);
+        if length == 0 {
+            return BOOL(1);
+        }
+
+        let mut buffer = vec![0u16; (length + 1) as usize];
+        let read = GetWindowTextW(hwnd, &mut buffer);
+
+        if read == 0 {
+            return BOOL(1);
+        }
+
+        let title = String::from_utf16_lossy(&buffer[..read as usize]);
+
+        if !title.is_empty() {
+            windows.push(WindowInfo { title, hwnd });
+        }
+
+        BOOL(1)
+    }
+}
+```
+```ui/src/lib.rs
+use slint::{SharedString, VecModel, ModelRc, Image, SharedPixelBuffer, Rgba8Pixel};
+use std::rc::Rc;
+
+slint::include_modules!();
+
+pub struct UiHandle {
+    pub app: AppWindow,
+    model: Rc<VecModel<SharedString>>,
+}
+
+impl UiHandle {
+    pub fn new() -> Result<Self, slint::PlatformError> {
+        let app = AppWindow::new()?;
+
+        let model = Rc::new(VecModel::from(Vec::<SharedString>::new()));
+        app.set_titles(ModelRc::from(model.clone()));
+
+        Ok(Self { app, model })
+    }
+
+    pub fn set_titles(&self, titles: Vec<String>) {
+        let data: Vec<SharedString> = titles
+            .into_iter()
+            .map(SharedString::from)
+            .collect();
+
+        self.model.set_vec(data);
+    }
+
+    pub fn set_frame(&self, width: u32, height: u32, data: Vec<u8>) {
+        let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            &data,
+            width,
+            height,
+        );
+
+        let image = Image::from_rgba8(buffer);
+        self.app.set_preview(image);
+    }
+}
+```
+```app/src/win_ui.rs
+use screen_ui::*;
+use screen_ui::UiHandle;
+use windows_backend::catcher::{get_windows, WindowInfo};
+use windows_backend::capture::start_capture;
+use slint::{SharedString, SharedPixelBuffer, Rgba8Pixel, Image};
+use std::sync::mpsc;
+use std::thread;
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let ui = UiHandle::new()?;
+    // канал кадров
+    let (tx, rx) = mpsc::channel::<(u32, u32, Vec<u8>)>();
+
+    let ui_weak = ui.app.as_weak();
+
+    thread::spawn(move || {
+        while let Ok((w, h, data)) = rx.recv() {
+            let ui_weak = ui_weak.clone();
+
+            slint::invoke_from_event_loop(move || {
+                if let Some(app) = ui_weak.upgrade() {
+                    let buffer =
+                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
+                    let image = Image::from_rgba8(buffer);
+                    app.set_preview(image);
+                }
+            }).ok();
+        }
+    });
+
+    let windows_cache =
+        std::rc::Rc::new(std::cell::RefCell::new(Vec::<WindowInfo>::new()));
+
+    {
+        let cache = windows_cache.clone();
+        let ui_ref = ui.app.as_weak();
+
+        ui.app.on_request_titles(move || {
+            let windows = get_windows();
+
+            let titles: Vec<SharedString> =
+                windows.iter().map(|w| SharedString::from(&w.title)).collect();
+
+            *cache.borrow_mut() = windows;
+
+            if let Some(app) = ui_ref.upgrade() {
+                app.set_titles((&titles[..]).into());
+            }
+        });
+    }
+
+    {
+        let cache = windows_cache.clone();
+        let tx_capture = tx.clone();
+
+        ui.app.on_window_selected(move |index| {
+            let windows = cache.borrow();
+            if let Some(selected) = windows.get(index as usize) {
+                println!("Selected title: {}", selected.title);
+
+                start_capture(selected.hwnd, tx_capture.clone());
+            }
+        });
+    }
+
+    ui.app.run()?;
+    Ok(())
+}
+```

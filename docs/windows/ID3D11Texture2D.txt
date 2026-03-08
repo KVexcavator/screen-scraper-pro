@@ -1,0 +1,100 @@
+вместо fake frame получить ID3D11Texture2D из frame.Surface()
+и вывести debug-информацию о texture
+WinRT даёт IDirect3DSurface, а нужен ID3D11Texture2D
+
+```capture_engine.rs
+use windows::Win32::System::WinRT::Direct3D11::IDirect3DDxgiInterfaceAccess;
+...
+fn get_texture_from_surface(surface: &IDirect3DSurface) -> Result<ID3D11Texture2D> {
+    unsafe {
+        let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
+
+        let texture: ID3D11Texture2D = access.GetInterface()?;
+
+        Ok(texture)
+    }
+}
+```
+* стандартный способ из Microsoft samples
+---
+обработчик FrameArrived
+заменить содержимое:
+```rust
+if let Ok(frame) = pool.TryGetNextFrame() {
+
+    if let Ok(surface) = frame.Surface() {
+
+        match get_texture_from_surface(&surface) {
+
+            Ok(texture) => {
+
+                let mut desc = D3D11_TEXTURE2D_DESC::default();
+
+                unsafe {
+                    texture.GetDesc(&mut desc);
+                }
+
+                println!(
+                    "TEXTURE: {}x{}  format={:?}  mip_levels={}  usage={:?}",
+                    desc.Width,
+                    desc.Height,
+                    desc.Format,
+                    desc.MipLevels,
+                    desc.Usage
+                );
+
+            }
+
+            Err(e) => {
+                eprintln!("Texture cast failed: {:?}", e);
+            }
+        }
+    }
+}
+```
+увидел:
+```
+TEXTURE: 1920x1032  format=DXGI_FORMAT(87)  mip_levels=1  usage=D3D11_USAGE(0)
+```
+Разберём твой вывод построчно. Он на самом деле **нормальный и ожидаемый** для Windows Graphics Capture через crate windows-capture.
+
+Ты видишь:
+
+```
+TEXTURE: 1920x1032  format=DXGI_FORMAT(87)  mip_levels=1  usage=D3D11_USAGE(0)
+```
+1. 1920x1032 размер текстуры кадра, который приходит из GPU
+2. format=DXGI_FORMAT(87) - формат пикселей текстуры GPU
+- число 87 соответствует DXGI_FORMAT_B8G8R8A8_UNORM - BGRA 8888 bits
+3. mip_levels=1
+- Mipmaps - это уменьшенные версии текстуры
+- для capture это не нужно, поэтому mip_levels = 1, только оригинальный кадр
+4. usage=D3D11_USAGE(0)
+- 0 означает D3D11_USAGE_DEFAULT
+- текстура живет в GPU
+- CPU её читать напрямую не может
+- STAGING - можно читать CPU, DYNAMIC - CPU пишет        |
+Если  требуется читать пиксели на CPU, нужно:
+CopyResource -> staging texture
+Map()
+===================
+можно дальше
+- сохранять кадры в файл (PNG/JPEG)
+- кодировать видео (H264/AV1)
+- стримить (WebRTC/RTMP)
+
+---
+сохранить первый кадр в PNG
+```
+ID3D11Texture2D (GPU)
+      ↓
+CopyResource
+      ↓
+STAGING TEXTURE
+      ↓
+Map()
+      ↓
+Vec<u8> pixels
+```
+
+

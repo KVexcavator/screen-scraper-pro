@@ -1,33 +1,60 @@
-import { Menu } from "header/menu.slint";
+import { Button, StandardButton } from "std-widgets.slint";
 import { BodyView } from "content/body.slint";
+import { Menu } from "header/menu.slint";
 
 export component AppWindow inherits Window {
     width: 800px;
     height: 600px;
     title: "GAME APP";
 
-    in property <[string]> titles;
+    // окно видео превью
     in property <image> preview;
+
+    // боковое меню
+    property <bool> menu_expanded: false;
+    property <length> menu_width: menu_expanded ? 200px : 44px;
+    animate menu_width { duration: 200ms; easing: ease; }
+    callback stop_capture();
+
+    // модалка список доступных окон
+    in property <[string]> titles;
     callback request_titles();
     callback window_selected(index: int);
-
     property <bool> show_modal_list: false;
 
-    VerticalLayout {
+
+    HorizontalLayout {
         spacing: 0px;
 
+        // Левое вертикальное меню
         Menu {
+            width: root.menu_width;
+            modal_list_open: root.show_modal_list;
+
             select_clicked => {
-                root.request_titles();
-                root.show_modal_list = true;
+                if (root.show_modal_list) {
+                    root.show_modal_list = false;
+                } else {
+                    root.request_titles();
+                    root.show_modal_list = true;
+                }
+            }
+
+            toggle_menu => {
+                root.menu_expanded = !root.menu_expanded;
+            }
+
+            stop_clicked => {
+                root.stop_capture();
             }
         }
 
+        // Основной контент
         BodyView {
+            width: 100%;
             show_modal_list: root.show_modal_list;
             titles: root.titles;
             preview: root.preview;
-
             item_selected(index) => {
                 root.window_selected(index);
                 root.show_modal_list = false;

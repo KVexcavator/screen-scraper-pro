@@ -2,14 +2,13 @@
 
 mod win_ui;
 
-fn main(){
+fn main() {
     #[cfg(target_os = "linux")]
-        {
-            linux_backend::run();
-        }
+    {
+        linux_backend::run();
+    }
     #[cfg(target_os = "windows")]
-        {
-            win_ui::run();
-        }
+    {
+        win_ui::run();
+    }
 }
-

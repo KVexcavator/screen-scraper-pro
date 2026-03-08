@@ -17,41 +17,40 @@ https://stackoverflow.com/questions/11283015/screen-capture-specific-window
 - GraphicsCaptureSession и Direct3D11CaptureFramePool для буферизации кадров в D3D11 текстуру. Требует Windows 10 1803+, работает асинхронно с событиями FrameArrived. 
 https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture-video
 ---
-Получение списка окон
-- EnumWindows с колбэком: перечисляет все топ-левел окна (GW_OWNER), фильтруйте по WS_VISIBLE, заголовку (GetWindowText), классу (GetClassName), exe (GetWindowThreadProcessId + GetModuleFileNameEx). Для игр/видео — проверяйте классы вроде "XLMAIN" (Excel), "SDL_app" или процессы по PID. Фильтруйте minimized (IsIconic). https://stackoverflow.com/questions/10246444/how-can-i-get-enumwindows-to-list-all-windows/47432615
----
-Пример псевдокода:  
-```c
-BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lParam) {
-    if (IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
-        // Get title, class, exe и добавьте в список
-    }
-    return TRUE;
-}
-EnumWindows(EnumProc, 0);
-```
+Получение списка окон с EnumWindows с колбэком:
+- перечисляет все топ-левел окна (GW_OWNER),
+фильтруeт:
+- по WS_VISIBLE,
+- заголовку (GetWindowText),
+- классу (GetClassName),
+- exe (GetWindowThreadProcessId + GetModuleFileNameEx).
+Для игр/видео:
+- проверяют классы вроде "XLMAIN" (Excel),
+- "SDL_app" или процессы по PID.
+Фильтрация по minimized (IsIconic)
+https://stackoverflow.com/questions/10246444/how-can-i-get-enumwindows-to-list-all-windows/47432615
 ---
 Передача видео между окнами
-
 Захват: Получаем кадры в D3D11/ID3D11Texture2D (WGC) или bitmap (BitBlt), конвертируем в RGBA/ARGB. Передача — рендер текстуры в целевое окно через DirectX (gs_texture в OBS, DrawTexture в custom рендерере): копируем в GPU-текстуру, масштабируем/компонуем в сцену. Асинхронно через FrameArrived, с dirty regions для оптимизации (только изменённые области). Для видео — энкодинг в H.264/AV1 через MediaFoundation
 https://github.com/obsproject/obs-studio/blob/master/plugins/win-capture/window-capture.c
----
-## Rust и Slint
-- windows-capture — основная либа на Graphics Capture API, поддерживает захват по HWND (Window::from_title/class/exe), frame::Frame с buffer() или save_as_image, энкодинг в MP4. Интегрируйте с wgpu/vulkano для текстур
-https://docs.rs/windows-capture/latest/windows_capture/
-- win-screenshot (BitBlt по HWND)
-https://lib.rs/crates/win-screenshot
-- Slint не захватывает чужие окна, но отображает текстуры — загружайте кадры из windows-capture в Image { source: ... }, обновляя динамически (timer или callback). Пример: захват в thread, конверт в SharedPixelBuffer<Rgba<u8>>
-https://docs.slint.dev/latest/docs/rust/slint/struct.Window
----
-Пример Rust:  
-```rust
-use windows_capture::window::Window;
-let window = Window::from_title("Game Window").unwrap();
-let frame = /* захват */;
-let pixels = frame.buffer()?; // Вставьте в Slint Image
-```
-
-## Практика в OBS
-
-OBS использует window-capture.c: EnumWindows-like (ms_find_window), BitBlt (dc_capture с PrintWindow/DC копированием) для legacy, WGC (winrt-capture с GraphicsCaptureItem::CreateForWindow(HWND)) для новых окон (Chrome, UWP, Office). Автовыбор метода (WGC для SDL_app/Chrome), client_area/force_sdr опции, DPI-awareness. Фильтр по title/class/exe/priority. [github](https://github.com/obsproject/obs-studio/blob/master/plugins/win-capture/window-capture.c)
+===
+Вопросы по теории захвата окон в Windows вкурить:
+- D3D11
+- DXGI
+- H.264
+- bitrate control
+- keyframes
+- GOP
+- latency tuning
+- NVENC
+- Message pump для MTA WinRT
+- staging texture
+- encoder
+===
+// TODO create videofile
+                                // понять что еще есть вo frame
+                                // например frame.Surface()
+                                // как получать ID3D11Texture2D
+                                // дальше либо:
+                                //  - копировать в staging texture
+                                //  - отдавать в encoder
