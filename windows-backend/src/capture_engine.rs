@@ -22,7 +22,10 @@
         STAGING Texture (CPU readable)
               │
               ▼
-        Vec<u8> RGBA
+        Vec<u8> BGRA
+              │
+              ▼
+        Frame converter
               │
               ▼
         Slint UI preview
@@ -163,10 +166,6 @@ impl CaptureEngine {
         let context = self.context.clone();
         let running_cb = running.clone();
 
-        /*
-            Staging texture used for GPU → CPU readback.
-            Created lazily on first frame.
-        */
         let mut staging_tex: Option<ID3D11Texture2D> = None;
 
         let mut width = 0;
@@ -180,7 +179,6 @@ impl CaptureEngine {
         let _token = frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(
                 move |pool, _| {
-
                     if !running_cb.load(Ordering::Relaxed) {
                         return Ok(());
                     }
@@ -191,20 +189,14 @@ impl CaptureEngine {
                     };
 
                     let frame = pool.TryGetNextFrame()?;
-
                     let surface = frame.Surface()?;
-
                     let texture = get_texture(&surface)?;
 
                     let mut desc = D3D11_TEXTURE2D_DESC::default();
 
                     unsafe { texture.GetDesc(&mut desc) };
 
-                    /*
-                        First frame: create staging texture
-                    */
                     if staging_tex.is_none() {
-
                         width = desc.Width;
                         height = desc.Height;
 
@@ -227,21 +219,11 @@ impl CaptureEngine {
                     let staging = staging_tex.as_ref().unwrap();
 
                     unsafe {
-
-                        /*
-                            GPU → CPU copy
-                        */
                         context.CopyResource(staging, &texture);
 
                         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
 
-                        context.Map(
-                            staging,
-                            0,
-                            D3D11_MAP_READ,
-                            0,
-                            Some(&mut mapped),
-                        )?;
+                        context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
 
                         let row_pitch = mapped.RowPitch as usize;
 
@@ -249,15 +231,10 @@ impl CaptureEngine {
 
                         let src = mapped.pData as *const u8;
 
-                        /*
-                            Copy row by row (RowPitch may be larger than width*4)
-                        */
                         for y in 0..height as usize {
-
                             let src_row = src.add(y * row_pitch);
 
-                            let dst_row =
-                                data.as_mut_ptr().add(y * width as usize * 4);
+                            let dst_row = data.as_mut_ptr().add(y * width as usize * 4);
 
                             std::ptr::copy_nonoverlapping(
                                 src_row,
@@ -268,22 +245,7 @@ impl CaptureEngine {
 
                         context.Unmap(staging, 0);
 
-                        /*
-                            Convert BGRA → RGBA
-                            (Slint expects RGBA)
-                        */
-                        for px in data.chunks_exact_mut(4) {
-
-                            let b = px[0];
-                            let g = px[1];
-                            let r = px[2];
-                            let a = px[3];
-
-                            px[0] = r;
-                            px[1] = g;
-                            px[2] = b;
-                            px[3] = a;
-                        }
+                        convert_bgra_to_rgba(&mut data);
 
                         on_frame(width, height, data);
                     }
@@ -299,9 +261,7 @@ impl CaptureEngine {
             WinRT message pump required for capture callbacks
         */
         while running.load(Ordering::Relaxed) {
-
             unsafe {
-
                 let mut msg = std::mem::MaybeUninit::<MSG>::uninit();
 
                 if PeekMessageW(
@@ -336,7 +296,6 @@ impl CaptureEngine {
 /// This is the entry point for Windows Graphics Capture.
 fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
     unsafe {
-
         let interop: IGraphicsCaptureItemInterop =
             windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
 
@@ -346,11 +305,29 @@ fn create_capture_item(hwnd: HWND) -> Result<GraphicsCaptureItem> {
 
 /// Converts WinRT surface → native D3D11 texture.
 fn get_texture(surface: &IDirect3DSurface) -> Result<ID3D11Texture2D> {
-
     unsafe {
-
         let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
 
         access.GetInterface()
+    }
+}
+
+/// Converts BGRA pixel buffer into RGBA.
+///
+/// Windows Graphics Capture produces frames in
+/// `DXGI_FORMAT_B8G8R8A8_UNORM`.
+///
+/// Slint expects `RGBA8`.
+pub fn convert_bgra_to_rgba(data: &mut [u8]) {
+    for px in data.chunks_exact_mut(4) {
+        let b = px[0];
+        let g = px[1];
+        let r = px[2];
+        let a = px[3];
+
+        px[0] = r;
+        px[1] = g;
+        px[2] = b;
+        px[3] = a;
     }
 }
