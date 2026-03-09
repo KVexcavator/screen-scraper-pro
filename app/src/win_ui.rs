@@ -211,34 +211,37 @@ fn spawn_ui_frame_consumer(
     ui: slint::Weak<AppWindow>,
     frame_rx: mpsc::Receiver<(u32, u32, Vec<u8>)>,
     record_tx: Option<mpsc::Sender<Vec<u8>>>,
-) {
-
+)
+{
     std::thread::spawn(move || {
 
         while let Ok((w, h, mut data)) = frame_rx.recv() {
+            // Send original BGRA to recorder
+            if let Some(tx) = &record_tx {
+                tx.send(data.clone()).ok();
+            }
+            // Convert for UI preview
+            convert_bgra_to_rgba(&mut data);
 
             let weak = ui.clone();
 
-            let ui_data = data.clone();
-
+            // Send frame to UI thread
             slint::invoke_from_event_loop(move || {
 
                 if let Some(app) = weak.upgrade() {
 
-                    let image = frame_to_slint_image(w, h, ui_data);
+                    let buffer =
+                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
+
+                    let image = Image::from_rgba8(buffer);
 
                     app.set_preview(image);
 
                 }
 
             }).ok();
-
-            if let Some(tx) = &record_tx {
-
-                tx.send(data).ok();
-
-            }
         }
+
     });
 }
 
@@ -325,16 +328,22 @@ fn stop_capture(running_flag: &mut Option<Arc<std::sync::atomic::AtomicBool>>) {
     *running_flag = None;
 }
 
-/*
-    ============================================================
-    FRAME → SLINT IMAGE
-    ============================================================
-*/
+/// Converts BGRA pixel buffer into RGBA.
+///
+/// Windows Graphics Capture produces frames in
+/// `DXGI_FORMAT_B8G8R8A8_UNORM`.
+///
+/// Slint expects `RGBA8`.
+pub fn convert_bgra_to_rgba(data: &mut [u8]) {
+    for px in data.chunks_exact_mut(4) {
+        let b = px[0];
+        let g = px[1];
+        let r = px[2];
+        let a = px[3];
 
-pub fn frame_to_slint_image(width: u32, height: u32, data: Vec<u8>) -> Image {
-
-    let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, width, height);
-
-    Image::from_rgba8(buffer)
-
+        px[0] = r;
+        px[1] = g;
+        px[2] = b;
+        px[3] = a;
+    }
 }

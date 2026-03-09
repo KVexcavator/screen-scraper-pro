@@ -245,8 +245,6 @@ impl CaptureEngine {
 
                         context.Unmap(staging, 0);
 
-                        convert_bgra_to_rgba(&mut data);
-
                         on_frame(width, height, data);
                     }
 
@@ -312,22 +310,3 @@ fn get_texture(surface: &IDirect3DSurface) -> Result<ID3D11Texture2D> {
     }
 }
 
-/// Converts BGRA pixel buffer into RGBA.
-///
-/// Windows Graphics Capture produces frames in
-/// `DXGI_FORMAT_B8G8R8A8_UNORM`.
-///
-/// Slint expects `RGBA8`.
-pub fn convert_bgra_to_rgba(data: &mut [u8]) {
-    for px in data.chunks_exact_mut(4) {
-        let b = px[0];
-        let g = px[1];
-        let r = px[2];
-        let a = px[3];
-
-        px[0] = r;
-        px[1] = g;
-        px[2] = b;
-        px[3] = a;
-    }
-}
