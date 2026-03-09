@@ -21,4 +21,9 @@ windows = { version = "0.58", features = [
     "Win32_System_WinRT_Graphics_Capture",
 
     "Win32_UI_WindowsAndMessaging",
+
+    "Win32_System_Com",
+    "Win32_Media",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Ole",
 ] }
