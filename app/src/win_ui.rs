@@ -76,7 +76,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     /*
         FRAME CHANNEL
     */
-    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Vec<u8>)>();
+    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Arc<Vec<u8>>)>();
 
     /*
         RECORD CHANNEL
@@ -159,7 +159,7 @@ fn register_stop_capture_handler(ui: &UiHandle, cmd_tx: mpsc::Sender<UICommand>)
 
         cmd_tx.send(UICommand::StopCapture).ok();
 
-        eprintln!("Button click STOP capture ==================>>>>>>>>>>>>");
+        // eprintln!("Button click STOP capture ==================>>>>>>>>>>>>");
 
     });
 }
@@ -177,9 +177,9 @@ fn register_start_record_handler(
 
             // Передаём ширину и высоту, как раньше
             engine.start_recording(
-                1920,          // width
-                1080,          // height
-                30,            // fps
+                1920,
+                1032,
+                30,
                 "output.mp4".to_string(),
                 rx,
             );
@@ -209,29 +209,27 @@ fn register_stop_record_handler(
 
 fn spawn_ui_frame_consumer(
     ui: slint::Weak<AppWindow>,
-    frame_rx: mpsc::Receiver<(u32, u32, Vec<u8>)>,
+    frame_rx: mpsc::Receiver<(u32, u32, Arc<Vec<u8>>)>,
     record_tx: Option<mpsc::Sender<Vec<u8>>>,
 )
 {
     std::thread::spawn(move || {
 
-        while let Ok((w, h, mut data)) = frame_rx.recv() {
-            // Send original BGRA to recorder
+        while let Ok((w, h, data)) = frame_rx.recv() {
+
             if let Some(tx) = &record_tx {
-                tx.send(data.clone()).ok();
+                tx.send((*data).clone()).ok();
             }
-            // Convert for UI preview
-            convert_bgra_to_rgba(&mut data);
 
             let weak = ui.clone();
+            let preview = (*data).clone();
 
-            // Send frame to UI thread
             slint::invoke_from_event_loop(move || {
 
                 if let Some(app) = weak.upgrade() {
 
                     let buffer =
-                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&data, w, h);
+                        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&preview, w, h);
 
                     let image = Image::from_rgba8(buffer);
 
@@ -253,7 +251,7 @@ fn spawn_ui_frame_consumer(
 
 fn spawn_capture_worker(
     cmd_rx: mpsc::Receiver<UICommand>,
-    frame_tx: mpsc::Sender<(u32, u32, Vec<u8>)>,
+    frame_tx: mpsc::Sender<(u32, u32, Arc<Vec<u8>>)>,
 ) {
 
     thread::spawn(move || {
@@ -286,7 +284,7 @@ fn spawn_capture_worker(
 
 fn start_capture(
     hwnd_value: isize,
-    frame_tx: mpsc::Sender<(u32, u32, Vec<u8>)>,
+    frame_tx: mpsc::Sender<(u32, u32, Arc<Vec<u8>>)>,
     running_flag: &mut Option<Arc<std::sync::atomic::AtomicBool>>,
 ) {
 
@@ -303,11 +301,13 @@ fn start_capture(
         let mut engine = CaptureEngine::init().unwrap();
 
         engine
-            .start(hwnd, running, move |w, h, data| {
+            .start(hwnd, running, move |w, h, mut data| {
 
                 println!("FRAME {}x{} bytes={}", w, h, data.len());
 
-                frame_tx.send((w, h, data)).ok();
+                convert_bgra_to_rgba(&mut data);
+
+                frame_tx.send((w, h, Arc::new(data))).ok();
 
             })
             .ok();
