@@ -60,5 +60,3 @@ SOURCE texture D3D11_TEXTURE2D_DESC { Width: 1920, Height: 1032, MipLevels: 1, A
 идеально 1920 * 1032 * 4 = 7 937 280
 после этого появится Vec<u8> формата BGRA BGRA BGRA
 ```
-============
-дальше ffmpeg pipe

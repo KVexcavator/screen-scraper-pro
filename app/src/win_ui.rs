@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 use screen_ui::UiHandle;
 use screen_ui::*;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
