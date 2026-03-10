@@ -1,3 +1,50 @@
+Пособработка:
+1. audio_mic_engine  пишет звук мкрофона в файл
+2. audio_sys_engine  пишет звук системы в файл (YouTube, игры, браузер)
+3. видео пишется как сейчас
+3️. после StopRecord запускается ffmpeg постобработка
+4️. ffmpeg делает
+- исправление цвета
+- mux audio+video
+Архитектура
+```
+Start Record
+     │
+     ├── RecordEngine → video.mp4
+     │
+     ├── MicEngine    → mic.wav
+     │
+     └── SysEngine    → system.wav
+
+
+Stop Record
+     │
+     ▼
+ffmpeg
+
+video.mp4
+mic.wav
+system.wav
+      ↓
+amix
+      ↓
+final_output.mp4
+```
+ffmpeg команда
+```
+ffmpeg \
+    -i video.mp4 \
+    -i mic.wav \
+    -i system.wav \
+    -filter_complex "[1:a][2:a]amix=inputs=2:duration=longest" \
+    -c:v copy \
+    -c:a aac \
+    final_output.mp4
+```
+Постобработка может занять несколько секунд 0 это нормально
+---
+теперь файлы появляются норм
+```app/src/win_ui.rs
 #![cfg(target_os = "windows")]
 
 use screen_ui::UiHandle;
@@ -361,3 +408,5 @@ pub fn convert_bgra_to_rgba(data: &mut [u8]) {
 
     }
 }
+```
+надо добавить пост обработку
