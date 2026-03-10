@@ -4,4 +4,5 @@
 .qodo
 .vscode
 Cargo.lock
-output.mp4
+*.mp4
+*.wav

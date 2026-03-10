@@ -1,0 +1,115 @@
+Отсутствие таймстемпов у кадров и аудио
+частая ошибка в стриминговых пайплайнах
+Сейчас у меня поток выглядит примерно так:
+```
+Frame
+Vec<u8>
+```
+и
+```
+Audio samples
+Vec<f32> / Vec<i16>
+```
+но нет времени, когда этот кадр или аудио реально был получен
+pipeline сейчас фактически такой:
+```
+frame
+frame
+frame
+frame
+```
+а должен быть:
+```
+frame @ 0 ms
+frame @ 33 ms
+frame @ 66 ms
+frame @ 100 ms
+```
+Preview, Recorder и RTMP начинают работать с разной скоростью
+получается эффект ускорение видео
+OBS / FFmpeg / GStreamer всегда используют PTS, DTS, timestamps
+даже если это raw frame
+---
+Для исправления нужно изменить тип кадра
+вместо:
+```rust
+Vec<u8>
+```
+делать:
+```rust
+pub struct VideoFrame {
+    pub data: Arc<Vec<u8>>,
+    pub timestamp: std::time::Instant,
+    pub width: u32,
+    pub height: u32,
+}
+```
+и для аудио
+```rust
+pub struct AudioFrame {
+    pub samples: Vec<f32>,
+    pub timestamp: Instant,
+    pub sample_rate: u32,
+    pub channels: u16,
+}
+```
+CaptureEngine в момент получения кадра:
+```rust
+let frame = VideoFrame {
+    data: Arc::new(buffer),
+    timestamp: Instant::now(),
+    width,
+    height,
+};
+```
+это критично для RTMP, потому что RTMP encoder должен знать:
+pts = timestamp - stream_start
+Preview может быть vsync 60hz, а capture 30 fps
+без timestamp preview будет дропать кадры случайно
+
+С timestamp можно делать:
+```
+frame pacing
+fps limiting
+latency measurement
+```
+
+pipeline
+```
+CaptureEngine
+      │
+      ▼
+VideoFrame { data, timestamp }
+      │
+      ▼
+FrameBus
+ ├ Preview
+ ├ Recorder
+ └ RTMP
+```
+Аудио
+```
+MicEngine ─┐
+           ├ AudioFrame
+SysEngine ─┘
+           │
+           ▼
+         AudioBus
+           │
+      ├ Recorder
+      └ RTMP mixer
+```
+
+---
+Timestamp должен ставиться в source, а не в bus.
+То есть в CaptureEngine, MicEngine, SysEngine
+---
+это нужно сделать сейчас, потому что когда появится RTMP, Recording, ReplayBuffer, WebRTC
+timestamp станет обязательным м менять тип кадров потом  боль
+
+---
+нужно только:
+1. изменить тип Frame
+2️. изменить отправку в bus
+3. изменить consumers
+логика останется та же.

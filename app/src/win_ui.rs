@@ -1,67 +1,27 @@
 #![cfg(target_os = "windows")]
 
-/*
-    Windows UI Runtime
-
-    This module connects the Slint UI with the Windows backend.
-
-    Responsibilities:
-
-    - Provide window list to the UI
-    - Start / stop capture sessions
-    - Transfer captured frames to the UI preview
-    - Coordinate background threads
-
-    High level pipeline:
-
-        UI
-         │
-         ▼
-    window selection
-         │
-         ▼
-    CaptureEngine (windows-backend)
-         │
-         ▼
-    frame channel (mpsc)
-         │
-         ▼
-    UI thread (invoke_from_event_loop)
-         │
-         ▼
-    Slint preview image
-*/
-
 use screen_ui::UiHandle;
 use screen_ui::*;
-
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
 
+use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 use windows_backend::capture_engine::CaptureEngine;
 use windows_backend::record_engine::RecordEngine;
+use windows_backend::audio_mic_engine::AudioMicEngine;
+use windows_backend::audio_sys_engine::AudioSysEngine;
 use windows_backend::catcher::{get_windows, WindowInfo};
 
 use windows::Win32::Foundation::HWND;
 
-/// Commands sent to the capture worker thread.
-///
-/// These commands control the lifecycle of the capture engine.
 enum UICommand {
-    /// Start capturing a specific window.
     StartCapture(isize),
-    /// Stop current capture session.
     StopCapture,
-    /// Exit worker thread.
     Exit,
 }
 
-/// Entry point for the Windows UI runtime.
-///
-/// Initializes the UI, connects event handlers
-/// and spawns background worker threads.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let ui = Arc::new(UiHandle::new()?);
@@ -76,15 +36,23 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     /*
         FRAME CHANNEL
     */
-    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Arc<Vec<u8>>)>();
+    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Arc<Vec<u8>>)>()
+
+        ;
 
     /*
         RECORD CHANNEL
     */
     let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
-
     let record_rx = Arc::new(Mutex::new(Some(record_rx)));
     let record_engine = Arc::new(Mutex::new(RecordEngine::new()));
+
+    /*
+        AUDIO ENGINES
+    */
+
+    let mic_engine = Arc::new(Mutex::new(AudioMicEngine::new()));
+    let sys_engine = Arc::new(Mutex::new(AudioSysEngine::new()));
 
     spawn_ui_frame_consumer(ui.app.as_weak(), frame_rx, Some(record_tx.clone()));
 
@@ -103,9 +71,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     register_stop_capture_handler(&ui, cmd_tx.clone());
 
-    register_start_record_handler(&ui, record_engine.clone(), record_rx.clone());
+    register_start_record_handler(
+        &ui,
+        record_engine.clone(),
+        record_rx.clone(),
+        mic_engine.clone(),
+        sys_engine.clone(),
+    );
 
-    register_stop_record_handler(&ui, record_engine.clone());
+    register_stop_record_handler(
+        &ui,
+        record_engine.clone(),
+        mic_engine.clone(),
+        sys_engine.clone(),
+    );
 
     ui.app.run()?;
 
@@ -159,45 +138,88 @@ fn register_stop_capture_handler(ui: &UiHandle, cmd_tx: mpsc::Sender<UICommand>)
 
         cmd_tx.send(UICommand::StopCapture).ok();
 
-        // eprintln!("Button click STOP capture ==================>>>>>>>>>>>>");
-
     });
 }
 
-// register_start_record_handler
+/*
+    ============================================================
+    RECORD HANDLERS
+    ============================================================
+*/
+
 fn register_start_record_handler(
     ui: &UiHandle,
     record_engine: Arc<Mutex<RecordEngine>>,
     record_rx: Arc<Mutex<Option<mpsc::Receiver<Vec<u8>>>>>,
+    mic_engine: Arc<Mutex<AudioMicEngine>>,
+    sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
     ui.app.on_start_record(move || {
+        println!("Start recording");
+        
         let rx = record_rx.lock().unwrap().take();
         if let Some(rx) = rx {
             let mut engine = record_engine.lock().unwrap();
-
-            // Передаём ширину и высоту, как раньше
             engine.start_recording(
                 1920,
                 1032,
                 30,
-                "output.mp4".to_string(),
+                "temp_video.avi".to_string(), // пишем временный RAW BGRA
                 rx,
             );
         }
+
+        mic_engine.lock().unwrap().start("mic.wav".to_string());
+        sys_engine.lock().unwrap().start("system.wav".to_string());
     });
 }
 
 fn register_stop_record_handler(
     ui: &UiHandle,
     record_engine: Arc<Mutex<RecordEngine>>,
+    mic_engine: Arc<Mutex<AudioMicEngine>>,
+    sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
-
     ui.app.on_stop_record(move || {
+        println!("Stop recording");
 
-        let mut engine = record_engine.lock().unwrap();
+        record_engine.lock().unwrap().stop_recording();
+        mic_engine.lock().unwrap().stop();
+        sys_engine.lock().unwrap().stop();
+        
+        thread::spawn(move || {
+            let ffmpeg_path = r".\bin\ffmpeg.exe";
+            let video_file = "temp_video.avi"; // сырой BGRA
+            let mic_file = "mic.wav";
+            let system_file = "system.wav";
+            let output_file = "final_output.mp4";
 
-        engine.stop_recording();
+            println!("Starting post-processing with ffmpeg...");
+            let status = Command::new(ffmpeg_path)
+                .args([
+                    "-y",
+                    "-i", video_file,
+                    "-i", mic_file,
+                    "-i", system_file,
+                    "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest[a]",
+                    "-map", "0:v",
+                    "-map", "[a]",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p", // гарантируем правильные цвета
+                    "-c:a", "aac",
+                    output_file,
+                ])
+                .status()
+                .expect("Failed to execute ffmpeg");
 
+            if status.success() {
+                println!("Post-processing finished: {}", output_file);
+            } else {
+                eprintln!("ffmpeg failed with status: {:?}", status);
+            }
+        });
     });
 }
 
@@ -303,8 +325,6 @@ fn start_capture(
         engine
             .start(hwnd, running, move |w, h, mut data| {
 
-                println!("FRAME {}x{} bytes={}", w, h, data.len());
-
                 convert_bgra_to_rgba(&mut data);
 
                 frame_tx.send((w, h, Arc::new(data))).ok();
@@ -328,14 +348,9 @@ fn stop_capture(running_flag: &mut Option<Arc<std::sync::atomic::AtomicBool>>) {
     *running_flag = None;
 }
 
-/// Converts BGRA pixel buffer into RGBA.
-///
-/// Windows Graphics Capture produces frames in
-/// `DXGI_FORMAT_B8G8R8A8_UNORM`.
-///
-/// Slint expects `RGBA8`.
 pub fn convert_bgra_to_rgba(data: &mut [u8]) {
     for px in data.chunks_exact_mut(4) {
+
         let b = px[0];
         let g = px[1];
         let r = px[2];
@@ -345,5 +360,6 @@ pub fn convert_bgra_to_rgba(data: &mut [u8]) {
         px[1] = g;
         px[2] = b;
         px[3] = a;
+
     }
 }

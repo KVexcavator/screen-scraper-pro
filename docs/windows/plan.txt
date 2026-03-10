@@ -1,4 +1,82 @@
-план:
-(не ломаем документацию и комментарии)
-- сейчас делаем record-engine
-- позже rtmp-engine
+мой код сейчас генерирует:
+BGRA frames
+mic PCM
+system PCM
+=========
+для RTMP нужен live pipeline
+сейчас источники:
+BGRA frames
+mic PCM
+system PCM
+
+Блок схема RTMP pipeline:
+BGRA frames -> ffmpeg stdin (rawvideo)
+(mic PCM and sys PCM) -> audio mixer -> ffmpeg audio pipe
+ffmpeg -> H264 + AAC -> FLV -> RTMP
+```
+две live трубы:
+```
+pipe:0  video
+pipe:3  audio
+```
+обычно используют named pipes
+```
+\\.\pipe\video_pipe
+\\.\pipe\audio_pipe
+```
+ffmpeg команда
+```bash
+ffmpeg \
+-f rawvideo \
+-pix_fmt rgba \
+-s 1920x1032 \
+-r 30 \
+-i \\.\pipe\video_pipe \
+
+-f f32le \
+-ar 48000 \
+-ac 2 \
+-i \\.\pipe\audio_pipe \
+
+-c:v libx264 \
+-preset veryfast \
+-tune zerolatency \
+
+-c:a aac \
+
+-f flv \
+rtmp://localhost/live/test
+```
+Rust код для каждый кадр:
+Video = BGRA frame -> RGBA -> write(video_pipe)
+Audio = (mic samples и system samples) -> mix -> write(audio_pipe)
+```
+ffmpeg получает
+video timestamps (fps)
+audio timestamps (sample rate)
+и делает sync сам
+---
+
+не нужно менять CaptureEngine
+не нужно менять audio engines
+добавляется только RtmpEngine который:
+- подписывается на frame channel
+- подписывается на audio channel
+- пишет в pipes
+```
+
+Самая сложная часть audio mixer но он на самом деле простой,пример:
+```rust
+for i in 0..samples {
+    out[i] = (mic[i] + sys[i]) * 0.5;
+}
+```
+Latency с таким pipeline будет ~200-400 ms, что нормально для RTMP
+---
+дальше cоздаём реальный production-ready RTMP engine для проекта, который:
+- делает named pipes
+- автоматически стартует ffmpeg
+- миксует аудио
+- не ломает архитектуру
+- не копирует кадры лишний раз
+========

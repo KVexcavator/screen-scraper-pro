@@ -1,0 +1,169 @@
+сейчас у меня такая схема:
+```
+CaptureEngine
+      │
+      ▼
+frame channel
+      │
+      ├ preview
+      └ record
+```
+---
+Bus (шина) это просто распределитель сообщений
+Producer отправляет один раз, а несколько consumers получают копии:
+Bus-архитектура хороша именно для стриминга потому что источники отделяются от потребителей
+получается слой Sources -> Bus -> Consumers
+```
+В нашем проекте будет так:
+Источник CaptureEngine генерирует BGRA frame Vec<u8>
+```
+              FrameBus
+CaptureEngine ─────┬──────────┬──────────┐
+                   ▼          ▼          ▼
+                Preview    Recorder     RTMP
+```
+Аудио источников у нас два MicEngine и SysEngine, оба отправляют PCM
+```
+MicEngine ─┐
+           ├── AudioBus ─────┬──────────┐
+SysEngine ─┘                 ▼          ▼
+                          Recorder     RTMP
+```
+Consumers: Preview Slint, Recorder
+каждый раз при добавлении нового consumer придётся переписывать CaptureEngine
+а с Bus CaptureEngine вообще не меняется.
+Producer ничего не знает о consumers
+CaptureEngine просто делает frame_bus.publish(frame) и всё
+меняется только точка отправки - frame_tx.send(frame) станет frame_bus.publish(frame)
+---
+простой FrameBus на Rust
+```rust
+pub struct FrameBus {
+    subscribers: Vec<Sender<Vec<u8>>>,
+}
+
+impl FrameBus {
+    pub fn new() -> Self {
+        Self {
+            subscribers: Vec::new()
+        }
+    }
+
+    pub fn subscribe(&mut self) -> Receiver<Vec<u8>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.subscribers.push(tx);
+        rx
+    }
+
+    pub fn publish(&mut self, frame: Vec<u8>) {
+        for sub in &self.subscribers {
+            let _ = sub.send(frame.clone());
+        }
+    }
+}
+```
+CaptureEngine тогда выглядит так
+```rust
+loop {
+    let frame = capture_frame();
+    frame_bus.publish(frame);
+}
+```
+CaptureEngine вообще не знает, кто слушает
+---
+RTMP engine просто подписывается
+```rust
+let frame_rx = frame_bus.subscribe();
+```
+и получает BGRA frames
+---
+Recorder тоже
+```rust
+let frame_rx = frame_bus.subscribe();
+```
+---
+Preview тоже
+```
+frame_bus.subscribe()
+```
+---
+AudioBus такой же - тип AudioPacket, например:
+```rust
+struct AudioPacket {
+    samples: Vec<f32>,
+    channels: u32,
+    sample_rate: u32,
+}
+```
+тогда RTMP mixer в будущем будет выглядеть так
+```
+AudioBus
+   │
+   ▼
+RTMP Engine
+   │
+   ▼
+mix mic + system
+   │
+   ▼
+ffmpeg pipe
+```
+---
+для производительности кадры должны идти без копирования
+1920x1032 BGRA:≈ 8 MB
+30 fps ≈ 240 MB/sec
+если копировать всё умрёт, поэтому тип должен быть Arc<Vec<u8>>,
+или ещё лучше Arc<[u8]>, тогда publish дешёвый
+frame_bus.publish(frame.clone()) - clone только увеличивает refcount
+production системы делают Arc<Frame> без копирования
+---
+Правильный тип кадра Arc<Vec<u8>> или Arc<[u8]>
+Тогда publish
+```rust
+pub fn publish(&mut self, frame: Arc<Vec<u8>>) {
+    for sub in &self.subscribers {
+        let _ = sub.send(frame.clone());
+    }
+}
+```
+clone тут не копирует память
+=============
+в проекте это будет так:
+Frame: pub type Frame = Arc<Vec<u8>>;
+FrameBus
+```rust
+pub struct FrameBus {
+    subs: Vec<Sender<Frame>>
+}
+```
+subscribe
+```rust
+pub fn subscribe(&mut self) -> Receiver<Frame>
+```
+publish
+```rust
+pub fn publish(&mut self, frame: Frame)
+```
+---
+CaptureEngine
+capture -> Arc::new(frame) -> publish
+Recorder
+subscribe -> encode
+RTMP
+subscribe -> ffmpeg pipe
+---
+RTMP engine будет просто:
+```
+frame_rx = frame_bus.subscribe()
+audio_rx = audio_bus.subscribe()
+```
+И главное не поломается то, что уже работает
+Потому что consumers останутся те же Preview и Recorder
+просто поменяется способ доставки кадров
+=====
+План действий:
+1. FrameBus
+2️. AudioBus
+3️. перевести Preview и Recorder на bus
+4️. убедиться что всё работает
+5️. добавить RTMP engine
