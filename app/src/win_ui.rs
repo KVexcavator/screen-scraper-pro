@@ -2,9 +2,9 @@
 
 use screen_ui::UiHandle;
 use screen_ui::*;
-
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
 
+use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -12,7 +12,6 @@ use windows_backend::capture_engine::CaptureEngine;
 use windows_backend::record_engine::RecordEngine;
 use windows_backend::audio_mic_engine::AudioMicEngine;
 use windows_backend::audio_sys_engine::AudioSysEngine;
-
 use windows_backend::catcher::{get_windows, WindowInfo};
 
 use windows::Win32::Foundation::HWND;
@@ -45,7 +44,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         RECORD CHANNEL
     */
     let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
-
     let record_rx = Arc::new(Mutex::new(Some(record_rx)));
     let record_engine = Arc::new(Mutex::new(RecordEngine::new()));
 
@@ -156,48 +154,23 @@ fn register_start_record_handler(
     mic_engine: Arc<Mutex<AudioMicEngine>>,
     sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
-
     ui.app.on_start_record(move || {
-
         println!("Start recording");
-
-        /*
-            VIDEO
-        */
-
+        
         let rx = record_rx.lock().unwrap().take();
-
         if let Some(rx) = rx {
-
             let mut engine = record_engine.lock().unwrap();
-
             engine.start_recording(
                 1920,
                 1032,
                 30,
-                "video.mp4".to_string(),
+                "temp_video.avi".to_string(), // пишем временный RAW BGRA
                 rx,
             );
         }
 
-        /*
-            MIC
-        */
-
-        mic_engine
-            .lock()
-            .unwrap()
-            .start("mic.wav".to_string());
-
-        /*
-            SYSTEM AUDIO
-        */
-
-        sys_engine
-            .lock()
-            .unwrap()
-            .start("system.wav".to_string());
-
+        mic_engine.lock().unwrap().start("mic.wav".to_string());
+        sys_engine.lock().unwrap().start("system.wav".to_string());
     });
 }
 
@@ -210,40 +183,31 @@ fn register_stop_record_handler(
     ui.app.on_stop_record(move || {
         println!("Stop recording");
 
-        // 1️⃣ останавливаем все движки
         record_engine.lock().unwrap().stop_recording();
         mic_engine.lock().unwrap().stop();
         sys_engine.lock().unwrap().stop();
-
-        // 2️⃣ пути к файлам
-        let ffmpeg_path = r".\bin\ffmpeg.exe";
-        let video_file = "video.mp4";   // MF записал H.264, но цвета могут быть синие
-        let mic_file = "mic.wav";
-        let system_file = "system.wav";
-        let output_file = "final_output.mp4";
-
-        // 3️⃣ запускаем постобработку в отдельном потоке
+        
         thread::spawn(move || {
-            println!("Starting post-processing with ffmpeg...");
+            let ffmpeg_path = r".\bin\ffmpeg.exe";
+            let video_file = "temp_video.avi"; // сырой BGRA
+            let mic_file = "mic.wav";
+            let system_file = "system.wav";
+            let output_file = "final_output.mp4";
 
-            // ffmpeg команда:
-            // - принудительно перекодируем видео через libx264
-            // - задаем pix_fmt=yuv420p для правильных цветов
-            // - микшируем два аудио потока
-            let status = std::process::Command::new(ffmpeg_path)
+            println!("Starting post-processing with ffmpeg...");
+            let status = Command::new(ffmpeg_path)
                 .args([
                     "-y",
                     "-i", video_file,
                     "-i", mic_file,
                     "-i", system_file,
-                    "-filter_complex",
-                    "[1:a][2:a]amix=inputs=2:duration=longest[a]",
+                    "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest[a]",
                     "-map", "0:v",
                     "-map", "[a]",
                     "-c:v", "libx264",
                     "-preset", "fast",
                     "-crf", "23",
-                    "-pix_fmt", "yuv420p",
+                    "-pix_fmt", "yuv420p", // гарантируем правильные цвета
                     "-c:a", "aac",
                     output_file,
                 ])
