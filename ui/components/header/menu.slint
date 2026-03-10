@@ -6,7 +6,9 @@ export component Menu inherits Rectangle {
     callback select_clicked();
     callback toggle_menu();
     in property <bool> modal_list_open;
-    callback stop_clicked();
+    callback stop_capture();
+    callback start_record();
+    callback stop_record();
 
     VerticalLayout {
         spacing: 12px;
@@ -55,7 +57,19 @@ export component Menu inherits Rectangle {
         if root.width > 60px: Button {
             text: "Stop Capture";
             min-height: 44px;
-            clicked => root.stop_clicked();
+            clicked => root.stop_capture();
+        }
+
+        if root.width > 60px: Button {
+            text: "Start Record";
+            min-height: 44px;
+            clicked => root.start_record();
+        }
+
+        if root.width > 60px: Button {
+            text: "Stop Record";
+            min-height: 44px;
+            clicked => root.stop_record();
         }
 
         // Spacer

@@ -30,4 +30,18 @@ impl UiHandle {
         let image = Image::from_rgba8(buffer);
         self.app.set_preview(image);
     }
+
+    pub fn on_start_record<F>(&self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        self.app.on_start_record(f);
+    }
+
+    pub fn on_stop_record<F>(&self, f: F)
+    where
+        F: Fn() + 'static,
+    {
+        self.app.on_stop_record(f);
+    }
 }

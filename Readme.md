@@ -54,6 +54,12 @@ source ~/.bashrc
 ```
 git reset --hard HEAD~1
 ```
+- убрать файл из git
+```
+git rm --cached path/to/file
+git rm -r --cached path/to/folder
+git commit -m "Stop tracking ignored file"
+```
 - автофикс при варнингах
 ```
 cargo clippy --fix --lib -p windows-backend

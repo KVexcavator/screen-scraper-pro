@@ -47,10 +47,3 @@ https://github.com/obsproject/obs-studio/blob/master/plugins/win-capture/window-
 - staging texture
 - encoder
 ===
-// TODO create videofile
-                                // понять что еще есть вo frame
-                                // например frame.Surface()
-                                // как получать ID3D11Texture2D
-                                // дальше либо:
-                                //  - копировать в staging texture
-                                //  - отдавать в encoder

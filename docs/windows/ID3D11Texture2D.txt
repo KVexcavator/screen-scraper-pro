@@ -56,13 +56,7 @@ if let Ok(frame) = pool.TryGetNextFrame() {
 ```
 TEXTURE: 1920x1032  format=DXGI_FORMAT(87)  mip_levels=1  usage=D3D11_USAGE(0)
 ```
-Разберём твой вывод построчно. Он на самом деле **нормальный и ожидаемый** для Windows Graphics Capture через crate windows-capture.
 
-Ты видишь:
-
-```
-TEXTURE: 1920x1032  format=DXGI_FORMAT(87)  mip_levels=1  usage=D3D11_USAGE(0)
-```
 1. 1920x1032 размер текстуры кадра, который приходит из GPU
 2. format=DXGI_FORMAT(87) - формат пикселей текстуры GPU
 - число 87 соответствует DXGI_FORMAT_B8G8R8A8_UNORM - BGRA 8888 bits
