@@ -207,17 +207,55 @@ fn register_stop_record_handler(
     mic_engine: Arc<Mutex<AudioMicEngine>>,
     sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
-
     ui.app.on_stop_record(move || {
-
         println!("Stop recording");
 
+        // 1️⃣ останавливаем все движки
         record_engine.lock().unwrap().stop_recording();
-
         mic_engine.lock().unwrap().stop();
-
         sys_engine.lock().unwrap().stop();
 
+        // 2️⃣ пути к файлам
+        let ffmpeg_path = r".\bin\ffmpeg.exe";
+        let video_file = "video.mp4";   // MF записал H.264, но цвета могут быть синие
+        let mic_file = "mic.wav";
+        let system_file = "system.wav";
+        let output_file = "final_output.mp4";
+
+        // 3️⃣ запускаем постобработку в отдельном потоке
+        thread::spawn(move || {
+            println!("Starting post-processing with ffmpeg...");
+
+            // ffmpeg команда:
+            // - принудительно перекодируем видео через libx264
+            // - задаем pix_fmt=yuv420p для правильных цветов
+            // - микшируем два аудио потока
+            let status = std::process::Command::new(ffmpeg_path)
+                .args([
+                    "-y",
+                    "-i", video_file,
+                    "-i", mic_file,
+                    "-i", system_file,
+                    "-filter_complex",
+                    "[1:a][2:a]amix=inputs=2:duration=longest[a]",
+                    "-map", "0:v",
+                    "-map", "[a]",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    output_file,
+                ])
+                .status()
+                .expect("Failed to execute ffmpeg");
+
+            if status.success() {
+                println!("Post-processing finished: {}", output_file);
+            } else {
+                eprintln!("ffmpeg failed with status: {:?}", status);
+            }
+        });
     });
 }
 
