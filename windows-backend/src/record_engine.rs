@@ -1,10 +1,20 @@
 #![cfg(target_os = "windows")]
 
-use std::sync::{Arc, mpsc::Receiver, atomic::{AtomicBool, Ordering}};
-use std::thread;
-use std::process::{Command, Stdio};
-use std::io::Write;
-use crate::bus::packets::VideoFrame;
+use std::{
+    io::Write,
+    process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::Receiver,
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
+
+use named_pipe::PipeOptions;
+
+use crate::bus::packets::{AudioPacket, VideoFrame};
 
 pub struct RecordEngine {
     running: Arc<AtomicBool>,
@@ -19,9 +29,6 @@ impl RecordEngine {
         }
     }
 
-    /// width, height, fps → размеры кадра и частота
-    /// path → куда сохраняем (временный BGRA .avi)
-    /// frame_rx → поток кадров BGRA
     pub fn start_recording(
         &mut self,
         width: u32,
@@ -29,6 +36,7 @@ impl RecordEngine {
         fps: u32,
         path: String,
         frame_rx: Receiver<Arc<VideoFrame>>,
+        audio_rx: Receiver<Arc<AudioPacket>>,
     ) {
         if self.running.load(Ordering::SeqCst) {
             println!("RecordEngine: already running");
@@ -37,8 +45,20 @@ impl RecordEngine {
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
 
+        println!("Starting ffmpeg...");
         self.handle = Some(thread::spawn(move || {
+            // Создаём named pipe для аудио
+            let pipe_name = r"\\.\pipe\screen_audio";
+            let audio_pipe = PipeOptions::new(pipe_name)
+                .single()
+                .unwrap();
+            println!("Named pipe created: {}", pipe_name);
+
+            // Запускаем FFmpeg асинхронно
             let mut ffmpeg = Command::new(r".\bin\ffmpeg.exe")
+                .stderr(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stdin(Stdio::piped())
                 .args([
                     "-y",
                     "-f", "rawvideo",
@@ -46,29 +66,69 @@ impl RecordEngine {
                     "-s", &format!("{}x{}", width, height),
                     "-r", &fps.to_string(),
                     "-i", "pipe:0",
-                    "-c:v", "rawvideo",
+                    "-f", "f32le",
+                    "-ar", "44100",
+                    "-ac", "2",
+                    "-i", pipe_name,
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
                     &path,
                 ])
-                .stdin(Stdio::piped())
                 .spawn()
                 .expect("Failed to spawn ffmpeg");
 
-            let mut stdin = ffmpeg.stdin.take().unwrap();
-
-            while running.load(Ordering::SeqCst) {
-                match frame_rx.recv() {
-                    Ok(frame) => {
-                        if stdin.write_all(frame.data.as_slice()).is_err() {
-                            break;
+            // Поток для видео
+            let mut video_stdin = ffmpeg.stdin.take().unwrap();
+            let running_v = running.clone();
+            let video_thread = thread::spawn(move || {
+                while running_v.load(Ordering::SeqCst) {
+                    match frame_rx.recv_timeout(Duration::from_millis(50)) {
+                        Ok(frame) => {
+                            if video_stdin.write_all(&frame.data).is_err() {
+                                break;
+                            }
                         }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(_) => break,
                     }
-                    Err(_) => break,
                 }
-            }
+                // Закрываем stdin, чтобы FFmpeg завершился корректно
+                let _ = video_stdin.flush();
+            });
 
-            // закрываем stdin, ждем завершения ffmpeg
-            drop(stdin);
+            // Поток для аудио
+            let running_a = running.clone();
+            let audio_thread = thread::spawn(move || {
+                println!("Waiting for FFmpeg to connect to audio pipe...");
+                let mut audio_writer = audio_pipe.wait().unwrap(); // <- wait() блокирует этот поток, но не основной
+                println!("FFmpeg connected to audio pipe");
+
+                while running_a.load(Ordering::SeqCst) {
+                    match audio_rx.recv_timeout(Duration::from_millis(50)) {
+                        Ok(pkt) => {
+                            let bytes = unsafe {
+                                std::slice::from_raw_parts(pkt.samples.as_ptr() as *const u8, pkt.samples.len() * 4)
+                            };
+                            if audio_writer.write_all(bytes).is_err() {
+                                break;
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(_) => break,
+                    }
+                }
+                let _ = audio_writer.flush();
+            });
+
+            // Ждём оба потока
+            let _ = video_thread.join();
+            let _ = audio_thread.join();
+
+            // Завершаем FFmpeg
             let _ = ffmpeg.wait();
+            println!("FFmpeg finished");
         }));
     }
 
@@ -77,8 +137,11 @@ impl RecordEngine {
             return;
         }
         self.running.store(false, Ordering::SeqCst);
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
+
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
         }
+
+        println!("Recording stopped");
     }
 }

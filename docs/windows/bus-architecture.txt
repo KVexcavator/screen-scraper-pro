@@ -187,8 +187,20 @@ dropped frames
 ---
 AudioMixer может накапливать бесконечные буферы
 ---
+record engine воозвращает brga а надо другой, что бы не синий цвет
+раньше решал постобработкой, а как налету
+---
+нет A/V синхронизации,
+OBS решает это через timestamp sync queue
+как сделать AVSync layer между Bus и RecordEngine
 
-aрхитектура
+видео будет быстрее аудио
+FrameBus → 30fps
+AudioBus → ~48000 samples
+ffmpeg не знает timestamps
+Нужен AV sync слой.
+===
+pipeline
 ```
 CaptureEngine
       │
@@ -199,28 +211,35 @@ CaptureEngine
  ▼               ▼
 Preview      RecordEngine
 
+CaptureEngine
+      │
+      ▼
+   FrameBus ───────────┐
+                       │
+                       ▼
+                    RecordEngine
+                       ▲
+                       │
+AudioMixer ─► AudioBus ┘
+                       │
+                       ▼
+                     ffmpeg
+                       │
+                       ▼
+                   final.mp4
 MicEngine ─► MicBus ┐
                     ├─► AudioMixer ─► AudioBus
 SysEngine ─► SysBus ┘
 
-3. шаг
-AudioBus → никто не читает
-Нужно сделать AudioRecorder, который:
+thread (RecordEngine)
+   │
+   ├─ video_thread
+   │     FrameBus → ffmpeg stdin
+   │
+   └─ audio_thread
+         AudioBus → named pipe
 ```
-AudioBus.subscribe()
-        ↓
-ffmpeg stdin (pcm_f32le)
-``
-Тогда:
-``
-FrameBus → video
-AudioBus → audio
-↓
-ffmpeg
-↓
-MP4
-```
-и mic.wav / system.wav больше не нужны вообще.
+
 4. шаг
 RTMP
 AudioBus.subscribe()

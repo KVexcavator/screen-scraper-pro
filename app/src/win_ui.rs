@@ -78,6 +78,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         &ui,
         record_engine.clone(),
         frame_bus.clone(),
+        audio_bus.clone(),
         mic_engine.clone(),
         sys_engine.clone(),
     );
@@ -142,6 +143,7 @@ fn register_start_record_handler(
     ui: &UiHandle,
     record_engine: Arc<Mutex<RecordEngine>>,
     frame_bus: Arc<FrameBus>,
+    audio_bus: Arc<AudioBus>,
     mic_engine: Arc<Mutex<AudioMicEngine>>,
     sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
@@ -153,12 +155,15 @@ fn register_start_record_handler(
 
         let mut engine = record_engine.lock().unwrap();
 
+        let audio_rx = audio_bus.subscribe();
+
         engine.start_recording(
             1920,
             1032,
             30,
-            "temp_video.avi".to_string(),
+            "final_output.mp4".to_string(),
             rx,
+            audio_rx,
         );
 
         mic_engine.lock().unwrap().start();
@@ -173,37 +178,14 @@ fn register_stop_record_handler(
     sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
     ui.app.on_stop_record(move || {
+
         println!("Stop recording");
 
         record_engine.lock().unwrap().stop_recording();
+
         mic_engine.lock().unwrap().stop();
         sys_engine.lock().unwrap().stop();
-        
-        thread::spawn(move || {
-            let ffmpeg_path = r".\bin\ffmpeg.exe";
-            let video_file = "temp_video.avi"; // сырой BGRA
-            let output_file = "final_output.mp4";
 
-            println!("Starting post-processing with ffmpeg...");
-            let status = Command::new(ffmpeg_path)
-                .args([
-                    "-y",
-                    "-i", video_file,
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-crf", "23",
-                    "-pix_fmt", "yuv420p",
-                    output_file,
-                ])
-                .status()
-                .expect("Failed to execute ffmpeg");
-
-            if status.success() {
-                println!("Post-processing finished: {}", output_file);
-            } else {
-                eprintln!("ffmpeg failed with status: {:?}", status);
-            }
-        });
     });
 }
 
