@@ -3,6 +3,8 @@
 use std::sync::{Arc, mpsc::Receiver, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::process::{Command, Stdio};
+use std::io::Write;
+use crate::bus::packets::VideoFrame;
 
 pub struct RecordEngine {
     running: Arc<AtomicBool>,
@@ -26,7 +28,7 @@ impl RecordEngine {
         height: u32,
         fps: u32,
         path: String,
-        frame_rx: Receiver<Vec<u8>>,
+        frame_rx: Receiver<Arc<VideoFrame>>,
     ) {
         if self.running.load(Ordering::SeqCst) {
             println!("RecordEngine: already running");
@@ -56,8 +58,7 @@ impl RecordEngine {
             while running.load(Ordering::SeqCst) {
                 match frame_rx.recv() {
                     Ok(frame) => {
-                        use std::io::Write;
-                        if stdin.write_all(&frame).is_err() {
+                        if stdin.write_all(frame.data.as_slice()).is_err() {
                             break;
                         }
                     }
