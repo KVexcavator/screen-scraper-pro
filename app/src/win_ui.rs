@@ -14,11 +14,13 @@ use windows_backend::capture_engine::CaptureEngine;
 use windows_backend::record_engine::RecordEngine;
 use windows_backend::audio_mic_engine::AudioMicEngine;
 use windows_backend::audio_sys_engine::AudioSysEngine;
+use windows_backend::audio_mixer::AudioMixer;
 use windows_backend::catcher::{get_windows, WindowInfo};
 use windows_backend::bus::{
     packets::{VideoFrame, AudioPacket},
     frame::FrameBus,
     audio::AudioBus,
+    audio_source::AudioSourceBus,
 };
 
 use windows::Win32::Foundation::HWND;
@@ -40,12 +42,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let frame_bus = Arc::new(FrameBus::new());
     // AUDIO BUS
     let audio_bus = Arc::new(AudioBus::new());
+    // SOURCE BUSES
+    let mic_bus = Arc::new(AudioSourceBus::new());
+    let sys_bus = Arc::new(AudioSourceBus::new());
+    // MIXER
+    let mixer = AudioMixer::new(
+        mic_bus.subscribe(),
+        sys_bus.subscribe(),
+        audio_bus.clone(),
+    );
+    mixer.start();
     // RECORD BUS
     let record_frames = frame_bus.subscribe();
     let record_engine = Arc::new(Mutex::new(RecordEngine::new()));
     // AUDIO ENGINES
-    let mic_engine = Arc::new(Mutex::new(AudioMicEngine::new(audio_bus.clone())));
-    let sys_engine = Arc::new(Mutex::new(AudioSysEngine::new(audio_bus.clone())));
+    let mic_engine =
+        Arc::new(Mutex::new(AudioMicEngine::new(mic_bus.clone())));
+    let sys_engine =
+        Arc::new(Mutex::new(AudioSysEngine::new(sys_bus.clone())));
 
     spawn_ui_frame_consumer(
         ui.app.as_weak(),

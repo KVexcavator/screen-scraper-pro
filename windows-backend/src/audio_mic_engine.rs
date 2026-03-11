@@ -1,6 +1,6 @@
 #![cfg(target_os = "windows")]
 // пишет только микрофон
-use crate::bus::audio::AudioBus;
+use crate::bus::audio_source::AudioSourceBus;
 use crate::bus::packets::AudioPacket;
 use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,11 +12,11 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 pub struct AudioMicEngine {
     running: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
-    bus: Arc<AudioBus>,
+    bus: Arc<AudioSourceBus>,
 }
 
 impl AudioMicEngine {
-    pub fn new(bus: Arc<AudioBus>) -> Self {
+    pub fn new(bus: Arc<AudioSourceBus>) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,

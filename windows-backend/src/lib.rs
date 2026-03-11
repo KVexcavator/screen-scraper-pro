@@ -6,3 +6,4 @@ pub mod record_engine;
 pub mod audio_mic_engine;
 pub mod audio_sys_engine;
 pub mod bus;
+pub mod audio_mixer;

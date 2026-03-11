@@ -185,8 +185,9 @@ memory growth
 dropped frames
 Это типичная проблема std::mpsc в стриминге, и она решается одной маленькой архитектурной правкой
 ---
-1. шаг
-движки публикуют AudioPacket в AudioBus
+AudioMixer может накапливать бесконечные буферы
+---
+
 aрхитектура
 ```
 CaptureEngine
@@ -198,23 +199,9 @@ CaptureEngine
  ▼               ▼
 Preview      RecordEngine
 
-MicEngine ─┐
-           ├──► AudioBus
-SysEngine ─┘
-```
-2. шаг
-сейчас у меня:
-
-MicEngine → AudioBus
-SysEngine → AudioBus
-
-но ffmpeg ждёт один аудиопоток.
-
-Поэтому нужно:
-
-MicEngine ─┐
-           ├──► AudioMixer ─► AudioBus
-SysEngine ─┘
+MicEngine ─► MicBus ┐
+                    ├─► AudioMixer ─► AudioBus
+SysEngine ─► SysBus ┘
 
 3. шаг
 AudioBus → никто не читает
