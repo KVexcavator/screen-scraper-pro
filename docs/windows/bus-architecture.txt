@@ -185,3 +185,60 @@ memory growth
 dropped frames
 Это типичная проблема std::mpsc в стриминге, и она решается одной маленькой архитектурной правкой
 ---
+1. шаг
+движки публикуют AudioPacket в AudioBus
+aрхитектура
+```
+CaptureEngine
+      │
+      ▼
+   FrameBus
+      │
+ ┌────┴──────────┐
+ ▼               ▼
+Preview      RecordEngine
+
+MicEngine ─┐
+           ├──► AudioBus
+SysEngine ─┘
+```
+2. шаг
+сейчас у меня:
+
+MicEngine → AudioBus
+SysEngine → AudioBus
+
+но ffmpeg ждёт один аудиопоток.
+
+Поэтому нужно:
+
+MicEngine ─┐
+           ├──► AudioMixer ─► AudioBus
+SysEngine ─┘
+
+3. шаг
+AudioBus → никто не читает
+Нужно сделать AudioRecorder, который:
+```
+AudioBus.subscribe()
+        ↓
+ffmpeg stdin (pcm_f32le)
+``
+Тогда:
+``
+FrameBus → video
+AudioBus → audio
+↓
+ffmpeg
+↓
+MP4
+```
+и mic.wav / system.wav больше не нужны вообще.
+4. шаг
+RTMP
+AudioBus.subscribe()
+FrameBus.subscribe()
+
+→ ffmpeg
+-f flv
+rtmp://server/live

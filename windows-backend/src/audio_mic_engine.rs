@@ -1,7 +1,10 @@
 #![cfg(target_os = "windows")]
 // пишет только микрофон
+use crate::bus::audio::AudioBus;
+use crate::bus::packets::AudioPacket;
+use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -9,17 +12,19 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 pub struct AudioMicEngine {
     running: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+    bus: Arc<AudioBus>,
 }
 
 impl AudioMicEngine {
-    pub fn new() -> Self {
+    pub fn new(bus: Arc<AudioBus>) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,
+            bus,
         }
     }
 
-    pub fn start(&mut self, path: String) {
+    pub fn start(&mut self) {
         if self.running.load(Ordering::SeqCst) {
             println!("AudioEngine: already running");
             return;
@@ -28,6 +33,7 @@ impl AudioMicEngine {
         self.running.store(true, Ordering::SeqCst);
 
         let running_thread = self.running.clone();
+        let bus = self.bus.clone();
 
         self.handle = Some(thread::spawn(move || {
 
@@ -49,19 +55,6 @@ impl AudioMicEngine {
                 sample_rate, channels
             );
 
-            let spec = hound::WavSpec {
-                channels,
-                sample_rate,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            };
-
-            let writer = Arc::new(Mutex::new(
-                hound::WavWriter::create(path, spec).expect("AudioEngine: create wav failed"),
-            ));
-
-            let writer_clone = writer.clone();
-
             let running_stream = running_thread.clone();
 
             let err_fn = |err| eprintln!("AudioEngine stream error: {}", err);
@@ -74,12 +67,14 @@ impl AudioMicEngine {
                             return;
                         }
 
-                        let mut writer = writer_clone.lock().unwrap();
+                        let packet = Arc::new(AudioPacket {
+                            samples: Arc::new(data.to_vec()),
+                            channels: channels as u32,
+                            sample_rate,
+                            timestamp: Instant::now(),
+                        });
 
-                        for &sample in data {
-                            let s = (sample * i16::MAX as f32) as i16;
-                            let _ = writer.write_sample(s);
-                        }
+                        bus.publish(packet);
                     },
                     err_fn,
                 )
@@ -96,10 +91,6 @@ impl AudioMicEngine {
             println!("AudioMicEngine: stopping");
 
             drop(stream);
-
-            if let Ok(mut writer) = writer.lock() {
-                let _ = writer.flush();
-            }
 
             println!("AudioMicEngine: finished");
         }));

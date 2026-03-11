@@ -1,5 +1,7 @@
 #![cfg(target_os = "windows")]
-
+use crate::bus::audio::AudioBus;
+use crate::bus::packets::AudioPacket;
+use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -14,18 +16,20 @@ use windows::{
 pub struct AudioSysEngine {
     running: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+    bus: Arc<AudioBus>,
 }
 
 impl AudioSysEngine {
 
-    pub fn new() -> Self {
+    pub fn new(bus: Arc<AudioBus>) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,
+            bus,
         }
     }
 
-    pub fn start(&mut self, path: String) {
+    pub fn start(&mut self) {
 
         if self.running.load(Ordering::SeqCst) {
             return;
@@ -33,6 +37,7 @@ impl AudioSysEngine {
 
         self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
+        let bus = self.bus.clone();
 
         self.handle = Some(thread::spawn(move || unsafe {
 
@@ -71,15 +76,6 @@ impl AudioSysEngine {
 
             audio_client.Start().unwrap();
 
-            let spec = hound::WavSpec {
-                channels,
-                sample_rate,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            };
-
-            let mut writer = hound::WavWriter::create(path, spec).unwrap();
-
             println!("SysAudio started {}Hz {}ch", sample_rate, channels);
 
             while running.load(Ordering::Relaxed) {
@@ -106,10 +102,14 @@ impl AudioSysEngine {
                         frames as usize * channels as usize,
                     );
 
-                    for &s in samples {
-                        let v = (s * i16::MAX as f32) as i16;
-                        writer.write_sample(v).ok();
-                    }
+                    let packet = Arc::new(AudioPacket {
+                        samples: Arc::new(samples.to_vec()),
+                        channels: channels as u32,
+                        sample_rate,
+                        timestamp: Instant::now(),
+                    });
+
+                    bus.publish(packet);
 
                     capture_client.ReleaseBuffer(frames).ok();
 
@@ -121,9 +121,6 @@ impl AudioSysEngine {
             }
 
             audio_client.Stop().ok();
-
-            writer.finalize().ok();
-
             println!("AudioSys stopped");
 
             CoUninitialize();

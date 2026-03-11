@@ -15,8 +15,11 @@ use windows_backend::record_engine::RecordEngine;
 use windows_backend::audio_mic_engine::AudioMicEngine;
 use windows_backend::audio_sys_engine::AudioSysEngine;
 use windows_backend::catcher::{get_windows, WindowInfo};
-use windows_backend::bus::frame::FrameBus;
-use windows_backend::bus::packets::VideoFrame;
+use windows_backend::bus::{
+    packets::{VideoFrame, AudioPacket},
+    frame::FrameBus,
+    audio::AudioBus,
+};
 
 use windows::Win32::Foundation::HWND;
 
@@ -35,12 +38,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     register_window_list_provider(&ui, windows_cache.clone());
     // FRAME BUS
     let frame_bus = Arc::new(FrameBus::new());
+    // AUDIO BUS
+    let audio_bus = Arc::new(AudioBus::new());
     // RECORD BUS
     let record_frames = frame_bus.subscribe();
     let record_engine = Arc::new(Mutex::new(RecordEngine::new()));
     // AUDIO ENGINES
-    let mic_engine = Arc::new(Mutex::new(AudioMicEngine::new()));
-    let sys_engine = Arc::new(Mutex::new(AudioSysEngine::new()));
+    let mic_engine = Arc::new(Mutex::new(AudioMicEngine::new(audio_bus.clone())));
+    let sys_engine = Arc::new(Mutex::new(AudioSysEngine::new(audio_bus.clone())));
 
     spawn_ui_frame_consumer(
         ui.app.as_weak(),
@@ -142,8 +147,8 @@ fn register_start_record_handler(
             rx,
         );
 
-        mic_engine.lock().unwrap().start("mic.wav".to_string());
-        sys_engine.lock().unwrap().start("system.wav".to_string());
+        mic_engine.lock().unwrap().start();
+        sys_engine.lock().unwrap().start();
     });
 }
 
@@ -163,8 +168,6 @@ fn register_stop_record_handler(
         thread::spawn(move || {
             let ffmpeg_path = r".\bin\ffmpeg.exe";
             let video_file = "temp_video.avi"; // сырой BGRA
-            let mic_file = "mic.wav";
-            let system_file = "system.wav";
             let output_file = "final_output.mp4";
 
             println!("Starting post-processing with ffmpeg...");
@@ -172,16 +175,10 @@ fn register_stop_record_handler(
                 .args([
                     "-y",
                     "-i", video_file,
-                    "-i", mic_file,
-                    "-i", system_file,
-                    "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest[a]",
-                    "-map", "0:v",
-                    "-map", "[a]",
                     "-c:v", "libx264",
                     "-preset", "fast",
                     "-crf", "23",
-                    "-pix_fmt", "yuv420p", // гарантируем правильные цвета
-                    "-c:a", "aac",
+                    "-pix_fmt", "yuv420p",
                     output_file,
                 ])
                 .status()
