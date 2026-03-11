@@ -1,5 +1,5 @@
 use std::sync::{mpsc, Arc, Mutex};
-use crate::frame::VideoFrame;
+use crate::bus::packets::VideoFrame;
 
 pub struct FrameBus {
     subs: Mutex<Vec<mpsc::Sender<Arc<VideoFrame>>>>,

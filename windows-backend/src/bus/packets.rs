@@ -7,3 +7,10 @@ pub struct VideoFrame {
     pub data: Arc<Vec<u8>>,
     pub timestamp: Instant,
 }
+
+pub struct AudioPacket {
+    pub samples: Arc<Vec<f32>>,
+    pub channels: u32,
+    pub sample_rate: u32,
+    pub timestamp: Instant,
+}

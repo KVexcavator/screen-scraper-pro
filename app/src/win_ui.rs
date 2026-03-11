@@ -9,15 +9,17 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Instant;
+
 use windows_backend::capture_engine::CaptureEngine;
 use windows_backend::record_engine::RecordEngine;
 use windows_backend::audio_mic_engine::AudioMicEngine;
 use windows_backend::audio_sys_engine::AudioSysEngine;
 use windows_backend::catcher::{get_windows, WindowInfo};
-use windows_backend::frame_bus::FrameBus;
+use windows_backend::bus::frame::FrameBus;
+use windows_backend::bus::packets::VideoFrame;
 
 use windows::Win32::Foundation::HWND;
-use windows_backend::frame::VideoFrame;
+
 
 enum UICommand {
     StartCapture(isize),
