@@ -6,15 +6,18 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
 
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 use std::thread;
-
+use std::time::Instant;
 use windows_backend::capture_engine::CaptureEngine;
 use windows_backend::record_engine::RecordEngine;
 use windows_backend::audio_mic_engine::AudioMicEngine;
 use windows_backend::audio_sys_engine::AudioSysEngine;
 use windows_backend::catcher::{get_windows, WindowInfo};
+use windows_backend::frame_bus::FrameBus;
 
 use windows::Win32::Foundation::HWND;
+use windows_backend::frame::VideoFrame;
 
 enum UICommand {
     StartCapture(isize),
@@ -25,52 +28,33 @@ enum UICommand {
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let ui = Arc::new(UiHandle::new()?);
-
-    /*
-        WINDOW CACHE
-    */
+    // WINDOW CACHE
     let windows_cache = Arc::new(Mutex::new(Vec::<WindowInfo>::new()));
-
     register_window_list_provider(&ui, windows_cache.clone());
-
-    /*
-        FRAME CHANNEL
-    */
-    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Arc<Vec<u8>>)>()
-
-        ;
-
-    /*
-        RECORD CHANNEL
-    */
+    // FRAME CHANNEL
+    let frame_bus = Arc::new(FrameBus::new());
+    // RECORD CHANNEL
     let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
     let record_rx = Arc::new(Mutex::new(Some(record_rx)));
     let record_engine = Arc::new(Mutex::new(RecordEngine::new()));
-
-    /*
-        AUDIO ENGINES
-    */
-
+    // AUDIO ENGINES
     let mic_engine = Arc::new(Mutex::new(AudioMicEngine::new()));
     let sys_engine = Arc::new(Mutex::new(AudioSysEngine::new()));
 
-    spawn_ui_frame_consumer(ui.app.as_weak(), frame_rx, Some(record_tx.clone()));
+    spawn_ui_frame_consumer(
+        ui.app.as_weak(),
+        frame_bus.subscribe(),
+        Some(record_tx.clone()),
+    );
 
-    /*
-        CAPTURE COMMAND WORKER
-    */
+    // CAPTURE COMMAND WORKER
     let (cmd_tx, cmd_rx) = mpsc::channel::<UICommand>();
 
-    spawn_capture_worker(cmd_rx, frame_tx);
+    spawn_capture_worker(cmd_rx, frame_bus.clone());
 
-    /*
-        UI EVENT HANDLERS
-    */
-
+    // UI EVENT HANDLERS
     register_window_selection_handler(&ui, windows_cache.clone(), cmd_tx.clone());
-
     register_stop_capture_handler(&ui, cmd_tx.clone());
-
     register_start_record_handler(
         &ui,
         record_engine.clone(),
@@ -78,7 +62,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         mic_engine.clone(),
         sys_engine.clone(),
     );
-
     register_stop_record_handler(
         &ui,
         record_engine.clone(),
@@ -87,16 +70,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     ui.app.run()?;
-
     Ok(())
 }
 
-/*
-    ============================================================
-    UI EVENT REGISTRATION
-    ============================================================
-*/
-
+// UI EVENT REGISTRATION
 fn register_window_list_provider(ui: &UiHandle, cache: Arc<Mutex<Vec<WindowInfo>>>) {
     let ui_ref = ui.app.as_weak();
 
@@ -141,12 +118,7 @@ fn register_stop_capture_handler(ui: &UiHandle, cmd_tx: mpsc::Sender<UICommand>)
     });
 }
 
-/*
-    ============================================================
-    RECORD HANDLERS
-    ============================================================
-*/
-
+// RECORD HANDLERS
 fn register_start_record_handler(
     ui: &UiHandle,
     record_engine: Arc<Mutex<RecordEngine>>,
@@ -223,24 +195,23 @@ fn register_stop_record_handler(
     });
 }
 
-/*
-    ============================================================
-    FRAME PIPELINE
-    ============================================================
-*/
-
+// FRAME PIPELINE
 fn spawn_ui_frame_consumer(
     ui: slint::Weak<AppWindow>,
-    frame_rx: mpsc::Receiver<(u32, u32, Arc<Vec<u8>>)>,
+    frame_rx: mpsc::Receiver<Arc<VideoFrame>>,
     record_tx: Option<mpsc::Sender<Vec<u8>>>,
 )
 {
     std::thread::spawn(move || {
 
-        while let Ok((w, h, data)) = frame_rx.recv() {
+        while let Ok(frame) = frame_rx.recv() {
+
+            let w = frame.width;
+            let h = frame.height;
+            let data = frame.data.clone();
 
             if let Some(tx) = &record_tx {
-                tx.send((*data).clone()).ok();
+                tx.send((*frame.data).clone()).ok();
             }
 
             let weak = ui.clone();
@@ -265,15 +236,11 @@ fn spawn_ui_frame_consumer(
     });
 }
 
-/*
-    ============================================================
-    CAPTURE WORKER
-    ============================================================
-*/
 
+// CAPTURE WORKER
 fn spawn_capture_worker(
     cmd_rx: mpsc::Receiver<UICommand>,
-    frame_tx: mpsc::Sender<(u32, u32, Arc<Vec<u8>>)>,
+    frame_bus: Arc<FrameBus>,
 ) {
 
     thread::spawn(move || {
@@ -288,7 +255,7 @@ fn spawn_capture_worker(
 
                 UICommand::StartCapture(hwnd_value) => {
 
-                    start_capture(hwnd_value, frame_tx.clone(), &mut running_flag);
+                    start_capture(hwnd_value, frame_bus.clone(), &mut running_flag);
 
                 }
 
@@ -306,8 +273,8 @@ fn spawn_capture_worker(
 
 fn start_capture(
     hwnd_value: isize,
-    frame_tx: mpsc::Sender<(u32, u32, Arc<Vec<u8>>)>,
-    running_flag: &mut Option<Arc<std::sync::atomic::AtomicBool>>,
+    frame_bus: Arc<FrameBus>,
+    running_flag: &mut Option<Arc<AtomicBool>>,
 ) {
 
     use std::sync::atomic::AtomicBool;
@@ -327,7 +294,14 @@ fn start_capture(
 
                 convert_bgra_to_rgba(&mut data);
 
-                frame_tx.send((w, h, Arc::new(data))).ok();
+                let frame = Arc::new(VideoFrame {
+                    width: w,
+                    height: h,
+                    data: Arc::new(data),
+                    timestamp: Instant::now(),
+                });
+
+                frame_bus.publish(frame);
 
             })
             .ok();
