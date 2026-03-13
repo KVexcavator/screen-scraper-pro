@@ -239,7 +239,7 @@ thread (RecordEngine)
    └─ audio_thread
          AudioBus → named pipe
 ```
-
+работает запись и предпоказ, но не пробовал со звуком
 4. шаг
 RTMP
 AudioBus.subscribe()
