@@ -6,15 +6,25 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer, SharedString};
 
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 use std::thread;
+use std::time::Instant;
 
 use windows_backend::capture_engine::CaptureEngine;
 use windows_backend::record_engine::RecordEngine;
 use windows_backend::audio_mic_engine::AudioMicEngine;
 use windows_backend::audio_sys_engine::AudioSysEngine;
+use windows_backend::audio_mixer::AudioMixer;
 use windows_backend::catcher::{get_windows, WindowInfo};
+use windows_backend::bus::{
+    packets::{VideoFrame, AudioPacket},
+    frame::FrameBus,
+    audio::AudioBus,
+    audio_source::AudioSourceBus,
+};
 
 use windows::Win32::Foundation::HWND;
+
 
 enum UICommand {
     StartCapture(isize),
@@ -25,60 +35,53 @@ enum UICommand {
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let ui = Arc::new(UiHandle::new()?);
-
-    /*
-        WINDOW CACHE
-    */
+    // WINDOW CACHE
     let windows_cache = Arc::new(Mutex::new(Vec::<WindowInfo>::new()));
-
     register_window_list_provider(&ui, windows_cache.clone());
-
-    /*
-        FRAME CHANNEL
-    */
-    let (frame_tx, frame_rx) = mpsc::channel::<(u32, u32, Arc<Vec<u8>>)>()
-
-        ;
-
-    /*
-        RECORD CHANNEL
-    */
-    let (record_tx, record_rx) = mpsc::channel::<Vec<u8>>();
-    let record_rx = Arc::new(Mutex::new(Some(record_rx)));
+    // FRAME BUS
+    let frame_bus = Arc::new(FrameBus::new());
+    // AUDIO BUS
+    let audio_bus = Arc::new(AudioBus::new());
+    // SOURCE BUSES
+    let mic_bus = Arc::new(AudioSourceBus::new());
+    let sys_bus = Arc::new(AudioSourceBus::new());
+    // MIXER
+    let mixer = AudioMixer::new(
+        mic_bus.subscribe(),
+        sys_bus.subscribe(),
+        audio_bus.clone(),
+    );
+    mixer.start();
+    // RECORD BUS
+    let record_frames = frame_bus.subscribe();
     let record_engine = Arc::new(Mutex::new(RecordEngine::new()));
+    // AUDIO ENGINES
+    let mic_engine =
+        Arc::new(Mutex::new(AudioMicEngine::new(mic_bus.clone())));
+    let sys_engine =
+        Arc::new(Mutex::new(AudioSysEngine::new(sys_bus.clone())));
 
-    /*
-        AUDIO ENGINES
-    */
+    spawn_ui_frame_consumer(
+        ui.app.as_weak(),
+        frame_bus.subscribe(),
+    );
 
-    let mic_engine = Arc::new(Mutex::new(AudioMicEngine::new()));
-    let sys_engine = Arc::new(Mutex::new(AudioSysEngine::new()));
-
-    spawn_ui_frame_consumer(ui.app.as_weak(), frame_rx, Some(record_tx.clone()));
-
-    /*
-        CAPTURE COMMAND WORKER
-    */
+    // CAPTURE COMMAND WORKER
     let (cmd_tx, cmd_rx) = mpsc::channel::<UICommand>();
 
-    spawn_capture_worker(cmd_rx, frame_tx);
+    spawn_capture_worker(cmd_rx, frame_bus.clone());
 
-    /*
-        UI EVENT HANDLERS
-    */
-
+    // UI EVENT HANDLERS
     register_window_selection_handler(&ui, windows_cache.clone(), cmd_tx.clone());
-
     register_stop_capture_handler(&ui, cmd_tx.clone());
-
     register_start_record_handler(
         &ui,
         record_engine.clone(),
-        record_rx.clone(),
+        frame_bus.clone(),
+        audio_bus.clone(),
         mic_engine.clone(),
         sys_engine.clone(),
     );
-
     register_stop_record_handler(
         &ui,
         record_engine.clone(),
@@ -87,16 +90,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     ui.app.run()?;
-
     Ok(())
 }
 
-/*
-    ============================================================
-    UI EVENT REGISTRATION
-    ============================================================
-*/
-
+// UI EVENT REGISTRATION
 fn register_window_list_provider(ui: &UiHandle, cache: Arc<Mutex<Vec<WindowInfo>>>) {
     let ui_ref = ui.app.as_weak();
 
@@ -141,36 +138,36 @@ fn register_stop_capture_handler(ui: &UiHandle, cmd_tx: mpsc::Sender<UICommand>)
     });
 }
 
-/*
-    ============================================================
-    RECORD HANDLERS
-    ============================================================
-*/
-
+// RECORD HANDLERS
 fn register_start_record_handler(
     ui: &UiHandle,
     record_engine: Arc<Mutex<RecordEngine>>,
-    record_rx: Arc<Mutex<Option<mpsc::Receiver<Vec<u8>>>>>,
+    frame_bus: Arc<FrameBus>,
+    audio_bus: Arc<AudioBus>,
     mic_engine: Arc<Mutex<AudioMicEngine>>,
     sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
     ui.app.on_start_record(move || {
-        println!("Start recording");
-        
-        let rx = record_rx.lock().unwrap().take();
-        if let Some(rx) = rx {
-            let mut engine = record_engine.lock().unwrap();
-            engine.start_recording(
-                1920,
-                1032,
-                30,
-                "temp_video.avi".to_string(), // пишем временный RAW BGRA
-                rx,
-            );
-        }
 
-        mic_engine.lock().unwrap().start("mic.wav".to_string());
-        sys_engine.lock().unwrap().start("system.wav".to_string());
+        println!("Start recording");
+
+        let rx = frame_bus.subscribe();
+
+        let mut engine = record_engine.lock().unwrap();
+
+        let audio_rx = audio_bus.subscribe();
+
+        engine.start_recording(
+            1920,
+            1032,
+            30,
+            "final_output.mp4".to_string(),
+            rx,
+            audio_rx,
+        );
+
+        mic_engine.lock().unwrap().start();
+        sys_engine.lock().unwrap().start();
     });
 }
 
@@ -181,67 +178,30 @@ fn register_stop_record_handler(
     sys_engine: Arc<Mutex<AudioSysEngine>>,
 ) {
     ui.app.on_stop_record(move || {
+
         println!("Stop recording");
 
         record_engine.lock().unwrap().stop_recording();
+
         mic_engine.lock().unwrap().stop();
         sys_engine.lock().unwrap().stop();
-        
-        thread::spawn(move || {
-            let ffmpeg_path = r".\bin\ffmpeg.exe";
-            let video_file = "temp_video.avi"; // сырой BGRA
-            let mic_file = "mic.wav";
-            let system_file = "system.wav";
-            let output_file = "final_output.mp4";
 
-            println!("Starting post-processing with ffmpeg...");
-            let status = Command::new(ffmpeg_path)
-                .args([
-                    "-y",
-                    "-i", video_file,
-                    "-i", mic_file,
-                    "-i", system_file,
-                    "-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest[a]",
-                    "-map", "0:v",
-                    "-map", "[a]",
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-crf", "23",
-                    "-pix_fmt", "yuv420p", // гарантируем правильные цвета
-                    "-c:a", "aac",
-                    output_file,
-                ])
-                .status()
-                .expect("Failed to execute ffmpeg");
-
-            if status.success() {
-                println!("Post-processing finished: {}", output_file);
-            } else {
-                eprintln!("ffmpeg failed with status: {:?}", status);
-            }
-        });
     });
 }
 
-/*
-    ============================================================
-    FRAME PIPELINE
-    ============================================================
-*/
-
+// FRAME PIPELINE
 fn spawn_ui_frame_consumer(
     ui: slint::Weak<AppWindow>,
-    frame_rx: mpsc::Receiver<(u32, u32, Arc<Vec<u8>>)>,
-    record_tx: Option<mpsc::Sender<Vec<u8>>>,
+    frame_rx: mpsc::Receiver<Arc<VideoFrame>>,
 )
 {
     std::thread::spawn(move || {
 
-        while let Ok((w, h, data)) = frame_rx.recv() {
+        while let Ok(frame) = frame_rx.recv() {
 
-            if let Some(tx) = &record_tx {
-                tx.send((*data).clone()).ok();
-            }
+            let w = frame.width;
+            let h = frame.height;
+            let data = frame.data.clone();
 
             let weak = ui.clone();
             let preview = (*data).clone();
@@ -265,15 +225,11 @@ fn spawn_ui_frame_consumer(
     });
 }
 
-/*
-    ============================================================
-    CAPTURE WORKER
-    ============================================================
-*/
 
+// CAPTURE WORKER
 fn spawn_capture_worker(
     cmd_rx: mpsc::Receiver<UICommand>,
-    frame_tx: mpsc::Sender<(u32, u32, Arc<Vec<u8>>)>,
+    frame_bus: Arc<FrameBus>,
 ) {
 
     thread::spawn(move || {
@@ -288,7 +244,7 @@ fn spawn_capture_worker(
 
                 UICommand::StartCapture(hwnd_value) => {
 
-                    start_capture(hwnd_value, frame_tx.clone(), &mut running_flag);
+                    start_capture(hwnd_value, frame_bus.clone(), &mut running_flag);
 
                 }
 
@@ -306,8 +262,8 @@ fn spawn_capture_worker(
 
 fn start_capture(
     hwnd_value: isize,
-    frame_tx: mpsc::Sender<(u32, u32, Arc<Vec<u8>>)>,
-    running_flag: &mut Option<Arc<std::sync::atomic::AtomicBool>>,
+    frame_bus: Arc<FrameBus>,
+    running_flag: &mut Option<Arc<AtomicBool>>,
 ) {
 
     use std::sync::atomic::AtomicBool;
@@ -327,7 +283,14 @@ fn start_capture(
 
                 convert_bgra_to_rgba(&mut data);
 
-                frame_tx.send((w, h, Arc::new(data))).ok();
+                let frame = Arc::new(VideoFrame {
+                    width: w,
+                    height: h,
+                    data: Arc::new(data),
+                    timestamp: Instant::now(),
+                });
+
+                frame_bus.publish(frame);
 
             })
             .ok();
